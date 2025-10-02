@@ -22,7 +22,7 @@ Follow the concise history: prefix commits with `feat:`, `fix:`, `refac`, `doc:`
 Protect secrets—`backend/start.sh` reads `WEBUI_SECRET_KEY` and JWT values from env or `.webui_secret_key`, so never commit real keys. Mount `backend/data` in Docker (`-v open-webui:/app/backend/data`) to preserve user content. Verify connectivity and scoped credentials before enabling optional engines (Ollama, Playwright, tool servers).
 
 ## Fork Maintenance & Upstream Sync
-Active fork: `Arconte112/open-webui-soren`; `upstream` targets `open-webui/open-webui`. Keep work on feature branches (e.g., `doc/repository-guidelines`) and merge through PRs. To sync releases safely: `git checkout main`, `git fetch upstream`, `git merge upstream/main` (or `git rebase`), resolve conflicts, rerun `npm run lint`, `pytest`, `npm run test:frontend`, then `git push origin main`. Rebase active branches onto the refreshed `main` before continuing.
+Active fork: `Arconte112/open-webui-soren`. The upstream remote is not kept attached by default. When a sync with `open-webui/open-webui` is requested, temporarily add it with `git remote add upstream https://github.com/open-webui/open-webui.git`, then `git fetch upstream`, merge or rebase `upstream/main` onto the local `main`, and finally `git remote remove upstream` once the update is complete. Always finish by pushing through `origin` only.
 
 ## Fork Policy
-This repository is a personal fork of Open WebUI. Never open pull requests against the upstream project; all customizations stay private under this fork. Pull from `upstream/main` only to ingest upstream changes while preserving local modifications.
+This repository is a personal fork of Open WebUI. Never open pull requests against the upstream project; all customizations stay private under this fork. Only reconnect to upstream when explicitly needed to pull changes, and remove the remote again immediately after the sync so the fork remains isolated.
