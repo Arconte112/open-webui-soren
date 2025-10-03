@@ -1,10 +1,12 @@
 import logging
 import math
+import os
 import re
+import time
+import uuid
 from collections import defaultdict
 from datetime import datetime
 from typing import Optional, Any
-import uuid
 
 
 from open_webui.utils.misc import get_last_user_message, get_messages_content
@@ -22,6 +24,8 @@ log.setLevel(SRC_LOG_LEVELS["RAG"])
 
 MEMORIES_DATABASE_URL = "postgresql+psycopg2://postgres:zFns3MZAQNnZ2UVj3q41j1kJn0ORdfJ9qNjHU7skR7ev50Ugi9y7aGOsrFlBbQPs@5.78.120.77:5434/soren_openwebui"
 _MEMORIES_ENGINE: Engine | None = None
+MEMORIES_CACHE_TTL = int(os.getenv("MEMORIES_CACHE_TTL", "30"))
+_MEMORIES_CACHE: tuple[float, str] | None = None
 
 
 def get_memories_engine() -> Engine | None:
@@ -35,7 +39,19 @@ def get_memories_engine() -> Engine | None:
     return _MEMORIES_ENGINE
 
 
+def clear_memories_cache() -> None:
+    global _MEMORIES_CACHE
+    _MEMORIES_CACHE = None
+
+
 def build_memories_variable() -> str:
+    global _MEMORIES_CACHE
+
+    if _MEMORIES_CACHE is not None:
+        cached_at, cached_value = _MEMORIES_CACHE
+        if time.time() - cached_at < MEMORIES_CACHE_TTL:
+            return cached_value
+
     engine = get_memories_engine()
     if engine is None:
         return ""
@@ -69,12 +85,14 @@ def build_memories_variable() -> str:
                 rows = result.mappings().all()
             else:
                 log.warning("No memories table found in external database")
+                _MEMORIES_CACHE = (time.time(), "")
                 return ""
     except SQLAlchemyError as exc:
         log.error("Failed to fetch memories: %s", exc)
         return ""
 
     if not rows:
+        _MEMORIES_CACHE = (time.time(), "")
         return ""
 
     grouped_memories: dict[str, list[tuple[int, str]]] = defaultdict(list)
@@ -92,8 +110,9 @@ def build_memories_variable() -> str:
             lines.append(f"{index}. {content}".strip())
         sections.append("\n".join(lines))
 
-    return "\n\n".join(sections)
-
+    result = "\n\n".join(sections)
+    _MEMORIES_CACHE = (time.time(), result)
+    return result
 
 def get_task_model_id(
     default_model_id: str, task_model: str, task_model_external: str, models

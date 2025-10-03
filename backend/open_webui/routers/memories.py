@@ -11,7 +11,7 @@ from open_webui.models.memories import Memories, MemoryModel
 from open_webui.retrieval.vector.factory import VECTOR_DB_CLIENT
 from open_webui.utils.auth import get_verified_user
 from open_webui.env import SRC_LOG_LEVELS
-from open_webui.utils.task import get_memories_engine
+from open_webui.utils.task import clear_memories_cache, get_memories_engine
 
 
 log = logging.getLogger(__name__)
@@ -181,7 +181,9 @@ async def create_external_memory(
             )
 
             row = conn.execute(query, params).mappings().one()
-            return _row_to_external_memory(row, columns)
+            record = _row_to_external_memory(row, columns)
+            clear_memories_cache()
+            return record
     except SQLAlchemyError as exc:
         log.error("Failed to create external memory: %s", exc)
         raise HTTPException(status_code=500, detail="Failed to create memory")
@@ -244,7 +246,9 @@ async def update_external_memory(
             if row is None:
                 raise HTTPException(status_code=404, detail="Memory not found")
 
-            return _row_to_external_memory(row, columns)
+            record = _row_to_external_memory(row, columns)
+            clear_memories_cache()
+            return record
     except SQLAlchemyError as exc:
         log.error("Failed to update external memory %s: %s", memory_id, exc)
         raise HTTPException(status_code=500, detail="Failed to update memory")
@@ -265,6 +269,7 @@ async def delete_external_memory(memory_id: int, user=Depends(get_verified_user)
             if result.rowcount == 0:
                 raise HTTPException(status_code=404, detail="Memory not found")
 
+            clear_memories_cache()
             return True
     except SQLAlchemyError as exc:
         log.error("Failed to delete external memory %s: %s", memory_id, exc)
