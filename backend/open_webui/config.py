@@ -786,51 +786,56 @@ load_oauth_providers()
 
 STATIC_DIR = Path(os.getenv("STATIC_DIR", OPEN_WEBUI_DIR / "static")).resolve()
 
-try:
-    if STATIC_DIR.exists():
-        for item in STATIC_DIR.iterdir():
-            if item.is_file() or item.is_symlink():
-                try:
-                    item.unlink()
-                except Exception as e:
-                    pass
-except Exception as e:
-    pass
+FRONTEND_STATIC_DIR = FRONTEND_BUILD_DIR / "static"
 
-for file_path in (FRONTEND_BUILD_DIR / "static").glob("**/*"):
-    if file_path.is_file():
-        target_path = STATIC_DIR / file_path.relative_to(
-            (FRONTEND_BUILD_DIR / "static")
-        )
-        target_path.parent.mkdir(parents=True, exist_ok=True)
+if FRONTEND_STATIC_DIR.exists():
+    try:
+        if STATIC_DIR.exists():
+            for item in STATIC_DIR.iterdir():
+                if item.is_file() or item.is_symlink():
+                    try:
+                        item.unlink()
+                    except Exception:
+                        pass
+    except Exception:
+        pass
+
+    for file_path in FRONTEND_STATIC_DIR.glob("**/*"):
+        if file_path.is_file():
+            target_path = STATIC_DIR / file_path.relative_to(FRONTEND_STATIC_DIR)
+            target_path.parent.mkdir(parents=True, exist_ok=True)
+            try:
+                shutil.copyfile(file_path, target_path)
+            except Exception as e:
+                logging.error(f"An error occurred: {e}")
+
+    frontend_favicon = FRONTEND_STATIC_DIR / "favicon.png"
+
+    if frontend_favicon.exists():
         try:
-            shutil.copyfile(file_path, target_path)
+            shutil.copyfile(frontend_favicon, STATIC_DIR / "favicon.png")
         except Exception as e:
             logging.error(f"An error occurred: {e}")
 
-frontend_favicon = FRONTEND_BUILD_DIR / "static" / "favicon.png"
+    frontend_splash = FRONTEND_STATIC_DIR / "splash.png"
 
-if frontend_favicon.exists():
-    try:
-        shutil.copyfile(frontend_favicon, STATIC_DIR / "favicon.png")
-    except Exception as e:
-        logging.error(f"An error occurred: {e}")
+    if frontend_splash.exists():
+        try:
+            shutil.copyfile(frontend_splash, STATIC_DIR / "splash.png")
+        except Exception as e:
+            logging.error(f"An error occurred: {e}")
 
-frontend_splash = FRONTEND_BUILD_DIR / "static" / "splash.png"
+    frontend_loader = FRONTEND_STATIC_DIR / "loader.js"
 
-if frontend_splash.exists():
-    try:
-        shutil.copyfile(frontend_splash, STATIC_DIR / "splash.png")
-    except Exception as e:
-        logging.error(f"An error occurred: {e}")
-
-frontend_loader = FRONTEND_BUILD_DIR / "static" / "loader.js"
-
-if frontend_loader.exists():
-    try:
-        shutil.copyfile(frontend_loader, STATIC_DIR / "loader.js")
-    except Exception as e:
-        logging.error(f"An error occurred: {e}")
+    if frontend_loader.exists():
+        try:
+            shutil.copyfile(frontend_loader, STATIC_DIR / "loader.js")
+        except Exception as e:
+            logging.error(f"An error occurred: {e}")
+else:
+    logging.debug(
+        "Skipping STATIC_DIR refresh because %s does not exist", FRONTEND_STATIC_DIR
+    )
 
 
 ####################################
