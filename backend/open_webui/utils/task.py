@@ -24,8 +24,9 @@ log.setLevel(SRC_LOG_LEVELS["RAG"])
 
 MEMORIES_DATABASE_URL = "postgresql+psycopg2://postgres:zFns3MZAQNnZ2UVj3q41j1kJn0ORdfJ9qNjHU7skR7ev50Ugi9y7aGOsrFlBbQPs@5.78.120.77:5434/soren_openwebui"
 _MEMORIES_ENGINE: Engine | None = None
-MEMORIES_CACHE_TTL = int(os.getenv("MEMORIES_CACHE_TTL", "30"))
+MEMORIES_CACHE_TTL = int(os.getenv("MEMORIES_CACHE_TTL", "300"))
 _MEMORIES_CACHE: tuple[float, str] | None = None
+_MEMORIES_CACHE_WARMED: bool = False
 
 
 def get_memories_engine() -> Engine | None:
@@ -40,17 +41,20 @@ def get_memories_engine() -> Engine | None:
 
 
 def clear_memories_cache() -> None:
-    global _MEMORIES_CACHE
+    global _MEMORIES_CACHE, _MEMORIES_CACHE_WARMED
     _MEMORIES_CACHE = None
+    _MEMORIES_CACHE_WARMED = False
 
 
 def build_memories_variable() -> str:
-    global _MEMORIES_CACHE
+    global _MEMORIES_CACHE, _MEMORIES_CACHE_WARMED
 
     if _MEMORIES_CACHE is not None:
         cached_at, cached_value = _MEMORIES_CACHE
         if time.time() - cached_at < MEMORIES_CACHE_TTL:
+            _MEMORIES_CACHE_WARMED = True
             return cached_value
+        _MEMORIES_CACHE_WARMED = False
 
     engine = get_memories_engine()
     if engine is None:
@@ -86,6 +90,7 @@ def build_memories_variable() -> str:
             else:
                 log.warning("No memories table found in external database")
                 _MEMORIES_CACHE = (time.time(), "")
+                _MEMORIES_CACHE_WARMED = True
                 return ""
     except SQLAlchemyError as exc:
         log.error("Failed to fetch memories: %s", exc)
@@ -93,6 +98,7 @@ def build_memories_variable() -> str:
 
     if not rows:
         _MEMORIES_CACHE = (time.time(), "")
+        _MEMORIES_CACHE_WARMED = True
         return ""
 
     grouped_memories: dict[str, list[tuple[int, str]]] = defaultdict(list)
@@ -112,7 +118,15 @@ def build_memories_variable() -> str:
 
     result = "\n\n".join(sections)
     _MEMORIES_CACHE = (time.time(), result)
+    _MEMORIES_CACHE_WARMED = True
     return result
+
+
+def is_memories_cache_warm() -> bool:
+    if _MEMORIES_CACHE is None or not _MEMORIES_CACHE_WARMED:
+        return False
+    cached_at, _ = _MEMORIES_CACHE
+    return time.time() - cached_at < MEMORIES_CACHE_TTL
 
 def get_task_model_id(
     default_model_id: str, task_model: str, task_model_external: str, models

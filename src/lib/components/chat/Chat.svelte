@@ -11,7 +11,7 @@
 
 	import { get, type Unsubscriber, type Writable } from 'svelte/store';
 	import type { i18n as i18nType } from 'i18next';
-	import { WEBUI_BASE_URL } from '$lib/constants';
+ 	import { WEBUI_BASE_URL, WEBUI_API_BASE_URL } from '$lib/constants';
 
 	import {
 		chatId,
@@ -1025,10 +1025,22 @@
 
 				oldSelectedModelIds = selectedModels;
 
+				await setDefaults();
+
 				history =
 					(chatContent?.history ?? undefined) !== undefined
 						? chatContent.history
 						: convertMessagesToHistory(chatContent.messages);
+
+				if (Array.isArray(chatContent?.toolIds)) {
+					const validToolIds = chatContent.toolIds.filter((id) =>
+						($tools ?? []).some((tool) => tool.id === id)
+					);
+
+					if (validToolIds.length > 0) {
+						selectedToolIds = [...new Set(validToolIds)];
+					}
+				}
 
 				chatTitle.set(chatContent.title);
 

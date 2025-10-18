@@ -67,6 +67,7 @@ from open_webui.socket.main import (
     get_models_in_use,
     get_active_user_ids,
 )
+from open_webui.utils.task import build_memories_variable, is_memories_cache_warm
 from open_webui.routers import (
     audio,
     images,
@@ -93,6 +94,7 @@ from open_webui.routers import (
     users,
     utils,
     scim,
+    soren,
 )
 
 from open_webui.routers.retrieval import (
@@ -581,6 +583,20 @@ async def lifespan(app: FastAPI):
 
     asyncio.create_task(periodic_usage_pool_cleanup())
 
+    async def warm_external_memories_cache() -> None:
+        if is_memories_cache_warm():
+            return
+        try:
+            await anyio.to_thread.run_sync(build_memories_variable)
+            log.debug("External memories cache warmed.")
+        except asyncio.CancelledError:
+            log.debug("External memories cache warm-up cancelled.")
+            raise
+        except Exception as exc:
+            log.warning("Failed to warm external memories cache: %s", exc)
+
+    app.state.memories_warm_task = asyncio.create_task(warm_external_memories_cache())
+
     if app.state.config.ENABLE_BASE_MODELS_CACHE:
         await get_all_models(
             Request(
@@ -603,6 +619,14 @@ async def lifespan(app: FastAPI):
         )
 
     yield
+
+    warm_task = getattr(app.state, "memories_warm_task", None)
+    if warm_task and not warm_task.done():
+        warm_task.cancel()
+        try:
+            await warm_task
+        except asyncio.CancelledError:
+            pass
 
     if hasattr(app.state, "redis_task_command_listener"):
         app.state.redis_task_command_listener.cancel()
@@ -1316,6 +1340,7 @@ app.include_router(
     evaluations.router, prefix="/api/v1/evaluations", tags=["evaluations"]
 )
 app.include_router(utils.router, prefix="/api/v1/utils", tags=["utils"])
+app.include_router(soren.router, prefix="/api/soren", tags=["soren"])
 
 # SCIM 2.0 API for identity management
 if SCIM_ENABLED:
