@@ -137,6 +137,7 @@
 	let imageGenerationEnabled = false;
 	let webSearchEnabled = false;
 	let codeInterpreterEnabled = false;
+	let reasoningEffort: string | null = null;
 
 	let showCommands = false;
 
@@ -158,6 +159,7 @@
 	let chatFiles = [];
 	let files = [];
 	let params = {};
+	$: reasoningEffort = params?.reasoning_effort ?? $settings?.params?.reasoning_effort ?? null;
 
 	$: if (chatIdProp) {
 		navigateHandler();
@@ -198,6 +200,9 @@
 						webSearchEnabled = input.webSearchEnabled;
 						imageGenerationEnabled = input.imageGenerationEnabled;
 						codeInterpreterEnabled = input.codeInterpreterEnabled;
+						if ('reasoningEffort' in input) {
+							handleReasoningChange(input.reasoningEffort);
+						}
 					}
 				} catch (e) {}
 			} else {
@@ -307,6 +312,15 @@
 					codeInterpreterEnabled = model.info.meta.defaultFeatureIds.includes('code_interpreter');
 				}
 			}
+		}
+	};
+
+	const handleReasoningChange = (level: string | null) => {
+		if (level === null) {
+			const { reasoning_effort, ...rest } = params ?? {};
+			params = { ...rest };
+		} else {
+			params = { ...params, reasoning_effort: level };
 		}
 	};
 
@@ -2526,12 +2540,16 @@
 									bind:imageGenerationEnabled
 									bind:codeInterpreterEnabled
 									bind:webSearchEnabled
+									{reasoningEffort}
 									bind:atSelectedModel
 									bind:showCommands
 									toolServers={$toolServers}
 									{generating}
 									{stopResponse}
 									{createMessagePair}
+									on:reasoningchange={(e) => {
+										handleReasoningChange(e.detail);
+									}}
 									onChange={(data) => {
 										if (!$temporaryChatEnabled) {
 											saveDraft(data, $chatId);
@@ -2578,12 +2596,16 @@
 									bind:imageGenerationEnabled
 									bind:codeInterpreterEnabled
 									bind:webSearchEnabled
+									{reasoningEffort}
 									bind:atSelectedModel
 									bind:showCommands
 									toolServers={$toolServers}
 									{stopResponse}
 									{createMessagePair}
 									{onSelect}
+									on:reasoningchange={(e) => {
+										handleReasoningChange(e.detail);
+									}}
 									onChange={(data) => {
 										if (!$temporaryChatEnabled) {
 											saveDraft(data);

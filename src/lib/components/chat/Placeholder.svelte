@@ -53,6 +53,7 @@
 	export let imageGenerationEnabled = false;
 	export let codeInterpreterEnabled = false;
 	export let webSearchEnabled = false;
+	export let reasoningEffort: string | null = null;
 
 	export let onSelect = (e) => {};
 	export let onChange = (e) => {};
@@ -209,6 +210,7 @@
 					bind:imageGenerationEnabled
 					bind:codeInterpreterEnabled
 					bind:webSearchEnabled
+					{reasoningEffort}
 					bind:atSelectedModel
 					bind:showCommands
 					{toolServers}
@@ -216,6 +218,9 @@
 					{createMessagePair}
 					placeholder={$i18n.t('How can I help you today?')}
 					{onChange}
+					on:reasoningchange={(e) => {
+						dispatch('reasoningchange', e.detail);
+					}}
 					on:upload={(e) => {
 						dispatch('upload', e.detail);
 					}}

@@ -73,6 +73,11 @@
 	import IntegrationsMenu from './MessageInput/IntegrationsMenu.svelte';
 	import Component from '../icons/Component.svelte';
 	import PlusAlt from '../icons/PlusAlt.svelte';
+	import AdjustmentsHorizontal from '../icons/AdjustmentsHorizontal.svelte';
+	import Check from '../icons/Check.svelte';
+
+	import Dropdown from '../common/Dropdown.svelte';
+	import { DropdownMenu } from 'bits-ui';
 
 	import { KokoroWorker } from '$lib/workers/KokoroWorker';
 
@@ -108,6 +113,7 @@
 	export let imageGenerationEnabled = false;
 	export let webSearchEnabled = false;
 	export let codeInterpreterEnabled = false;
+	export let reasoningEffort: string | null = null;
 
 	let showInputVariablesModal = false;
 	let inputVariablesModalCallback = (variableValues) => {};
@@ -118,6 +124,22 @@
 	let selectedValvesType = 'tool'; // 'tool' or 'function'
 	let selectedValvesItemId = null;
 	let integrationsMenuCloseOnOutsideClick = true;
+
+	const reasoningOptions = ['low', 'medium', 'high'];
+	let reasoningDisplay: string | null = null;
+	let showReasoningMenu = false;
+	$: reasoningDisplay = reasoningEffort ?? $settings?.params?.reasoning_effort ?? null;
+
+	const selectReasoningEffort = (level: string | null) => {
+		dispatch('reasoningchange', level);
+		showReasoningMenu = false;
+	};
+
+	const reasoningLabel = (level: string | null) => {
+		if (!level) return $i18n.t('Default');
+		const label = level.charAt(0).toUpperCase() + level.slice(1);
+		return $i18n.t(label);
+	};
 
 	$: if (!showValvesModal) {
 		integrationsMenuCloseOnOutsideClick = true;
@@ -138,7 +160,8 @@
 		selectedFilterIds,
 		imageGenerationEnabled,
 		webSearchEnabled,
-		codeInterpreterEnabled
+		codeInterpreterEnabled,
+		reasoningEffort
 	});
 
 	const inputVariableHandler = async (text: string): Promise<string> => {
@@ -1495,6 +1518,62 @@
 									{/if}
 
 									<div class="ml-1 flex gap-1.5">
+										<Dropdown bind:show={showReasoningMenu} side="top" align="start">
+											<Tooltip content={$i18n.t('Reasoning Effort')} placement="top">
+												<button
+													id="reasoning-effort-button"
+													class="group px-2.5 py-[7px] flex gap-1.5 items-center text-sm rounded-full transition-colors duration-200 focus:outline-hidden border {reasoningDisplay
+														? ' text-sky-500 dark:text-sky-200 bg-sky-50 hover:bg-sky-100 dark:bg-sky-500/10 dark:hover:bg-sky-600/20 border-sky-200/60 dark:border-sky-500/30'
+														: 'text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 border-transparent'}"
+													type="button"
+												>
+													<AdjustmentsHorizontal className="size-4" strokeWidth="1.65" />
+													<span class="capitalize text-xs">
+														{reasoningLabel(reasoningDisplay)}
+													</span>
+												</button>
+											</Tooltip>
+
+											<div slot="content">
+												<DropdownMenu.Content
+													class="w-48 rounded-2xl px-1 py-1 border border-gray-100 dark:border-gray-800 z-50 bg-white dark:bg-gray-850 dark:text-white shadow-lg"
+													sideOffset={6}
+													alignOffset={-6}
+													side="top"
+													align="start"
+												>
+													{#each reasoningOptions as level}
+														<DropdownMenu.Item
+															class="flex items-center gap-2 px-2.5 py-1.5 rounded-xl text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800/60 {reasoningDisplay === level
+																? 'bg-sky-50 dark:bg-sky-500/10 text-sky-600 dark:text-sky-200'
+																: 'text-gray-700 dark:text-gray-200'}"
+															on:click={() => selectReasoningEffort(level)}
+														>
+															<span
+																class="h-2 w-2 rounded-full {level === 'low'
+																	? 'bg-emerald-400'
+																	: level === 'medium'
+																		? 'bg-amber-400'
+																		: 'bg-rose-400'}"
+															/>
+															<span class="capitalize flex-1">{reasoningLabel(level)}</span>
+															{#if reasoningDisplay === level}
+																<Check className="size-3.5" strokeWidth="2" />
+															{/if}
+														</DropdownMenu.Item>
+													{/each}
+
+													<DropdownMenu.Item
+														class="flex items-center gap-2 px-2.5 py-1.5 rounded-xl text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800/60 text-gray-600 dark:text-gray-300"
+														on:click={() => selectReasoningEffort(null)}
+													>
+														<span class="h-2 w-2 rounded-full bg-gray-300 dark:bg-gray-600" />
+														<span class="flex-1">{reasoningLabel(null)}</span>
+													</DropdownMenu.Item>
+												</DropdownMenu.Content>
+											</div>
+										</Dropdown>
+
 										{#if (selectedToolIds ?? []).length > 0}
 											<Tooltip
 												content={$i18n.t('{{COUNT}} Available Tools', {
