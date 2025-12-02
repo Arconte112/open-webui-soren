@@ -1905,13 +1905,14 @@
 			}))
 		].filter((message) => message);
 
-		messages = messages
-			.map((message, idx, arr) => ({
-				role: message.role,
-				...((message.files?.filter((file) => file.type === 'image').length > 0 ?? false) &&
-				message.role === 'user'
-					? {
-							content: [
+	messages = messages
+		.map((message, idx, arr) => ({
+			role: message.role,
+			timestamp: message.timestamp,
+			...((message.files?.filter((file) => file.type === 'image').length > 0 ?? false) &&
+			message.role === 'user'
+				? {
+						content: [
 								{
 									type: 'text',
 									text: message?.merged?.content ?? message.content
