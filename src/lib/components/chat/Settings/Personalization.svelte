@@ -2,6 +2,7 @@
 	import { createEventDispatcher } from 'svelte';
 
 	import ManageModal from './Personalization/ManageModal.svelte';
+	import ChatSummariesSection from './Personalization/ChatSummariesSection.svelte';
 
 	const dispatch = createEventDispatcher();
 
@@ -24,24 +25,30 @@
 	}}
 >
 	<div class="py-1 overflow-y-auto max-h-[28rem] md:max-h-full space-y-4">
-		<div class="space-y-1">
-			<div class="text-sm font-medium">Memorias personalizadas</div>
-			<div class="text-xs text-gray-600 dark:text-gray-400 leading-relaxed">
-				Gestiona las memorias almacenadas en tu base de datos externa, organiza el contenido por categorías y mantén sincronizada la variable
-				<span class="font-mono text-[0.7rem]">{MEMORIES_VARIABLE}</span> con lo que necesites que el asistente recuerde.
+		<div class="border border-gray-100 dark:border-gray-800 rounded-2xl p-4 space-y-3">
+			<div class="space-y-1">
+				<div class="text-sm font-medium">Memorias personalizadas</div>
+				<div class="text-xs text-gray-600 dark:text-gray-400 leading-relaxed">
+					Gestiona las memorias almacenadas en tu base de datos externa, organiza el contenido por categorías y mantén sincronizada la variable
+					<span class="font-mono text-[0.7rem]">{MEMORIES_VARIABLE}</span> con lo que necesites que el asistente recuerde.
+				</div>
+			</div>
+
+			<div>
+				<button
+					type="button"
+					class="px-3.5 py-1.5 font-medium hover:bg-black/5 dark:hover:bg-white/5 outline outline-1 outline-gray-300 dark:outline-gray-800 rounded-3xl"
+					on:click={() => {
+						showManageModal = true;
+					}}
+				>
+					Abrir gestor de memorias
+				</button>
 			</div>
 		</div>
 
-		<div>
-			<button
-				type="button"
-				class="px-3.5 py-1.5 font-medium hover:bg-black/5 dark:hover:bg-white/5 outline outline-1 outline-gray-300 dark:outline-gray-800 rounded-3xl"
-				on:click={() => {
-					showManageModal = true;
-				}}
-			>
-				Abrir gestor de memorias
-			</button>
+		<div class="border border-gray-100 dark:border-gray-800 rounded-2xl p-4">
+			<ChatSummariesSection />
 		</div>
 	</div>
 

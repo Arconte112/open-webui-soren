@@ -28,6 +28,10 @@ MEMORIES_CACHE_TTL = int(os.getenv("MEMORIES_CACHE_TTL", "300"))
 _MEMORIES_CACHE: tuple[float, str] | None = None
 _MEMORIES_CACHE_WARMED: bool = False
 
+# Chat summaries cache (per user)
+CHAT_SUMMARIES_CACHE_TTL = int(os.getenv("CHAT_SUMMARIES_CACHE_TTL", "300"))
+_CHAT_SUMMARIES_CACHE: dict[str, tuple[float, int, str]] = {}
+
 
 def get_memories_engine() -> Engine | None:
     global _MEMORIES_ENGINE
@@ -44,6 +48,13 @@ def clear_memories_cache() -> None:
     global _MEMORIES_CACHE, _MEMORIES_CACHE_WARMED
     _MEMORIES_CACHE = None
     _MEMORIES_CACHE_WARMED = False
+
+
+def clear_chat_summaries_cache(user_id: Optional[str] = None) -> None:
+    if user_id:
+        _CHAT_SUMMARIES_CACHE.pop(user_id, None)
+    else:
+        _CHAT_SUMMARIES_CACHE.clear()
 
 
 def build_memories_variable() -> str:
@@ -119,6 +130,73 @@ def build_memories_variable() -> str:
     result = "\n\n".join(sections)
     _MEMORIES_CACHE = (time.time(), result)
     _MEMORIES_CACHE_WARMED = True
+    return result
+
+
+def build_chat_summaries_variable(user_id: Optional[str]) -> str:
+    """
+    Devuelve un bloque de texto con los últimos resúmenes de chat del usuario.
+    Usa la misma base externa que memorias.
+    """
+    if not user_id:
+        return ""
+
+    cached = _CHAT_SUMMARIES_CACHE.get(user_id)
+    if cached and (time.time() - cached[0] < CHAT_SUMMARIES_CACHE_TTL):
+        return cached[2]
+
+    engine = get_memories_engine()
+    if engine is None:
+        return ""
+
+    # Obtener límite personalizado
+    try:
+        with engine.connect() as conn:
+            max_items_row = conn.execute(
+                text(
+                    "SELECT COALESCE(max_items, 20) FROM chat_summary_settings WHERE user_id = :user_id"
+                ),
+                {"user_id": user_id},
+            ).first()
+            max_items = int(max_items_row[0]) if max_items_row else 20
+            if max_items < 1:
+                max_items = 1
+            if max_items > 200:
+                max_items = 200
+    except SQLAlchemyError as exc:
+        log.error("Failed to fetch chat summary settings: %s", exc)
+        max_items = 20
+
+    try:
+        with engine.connect() as conn:
+            rows = conn.execute(
+                text(
+                    "SELECT chat_id, COALESCE(summary, 'null') AS summary, created_at "
+                    "FROM chat_summaries WHERE user_id = :user_id "
+                    "ORDER BY created_at DESC LIMIT :limit"
+                ),
+                {"user_id": user_id, "limit": max_items},
+            ).all()
+    except SQLAlchemyError as exc:
+        log.error("Failed to fetch chat summaries: %s", exc)
+        return ""
+
+    if not rows:
+        _CHAT_SUMMARIES_CACHE[user_id] = (time.time(), max_items, "")
+        return ""
+
+    lines = ["Chat Summaries:"]
+    for idx, row in enumerate(rows, start=1):
+        chat_id, summary, created_at = row
+        stamp = (
+            created_at.strftime("%Y-%m-%d %H:%M")
+            if isinstance(created_at, datetime)
+            else str(created_at)
+        )
+        lines.append(f"{idx}. {chat_id}: {summary} ({stamp})")
+
+    result = "\n".join(lines)
+    _CHAT_SUMMARIES_CACHE[user_id] = (time.time(), max_items, result)
     return result
 
 
@@ -219,6 +297,19 @@ def prompt_template(template: str, user: Optional[Any] = None) -> str:
     template = template.replace(
         "{{USER_LOCATION}}", USER_VARIABLES.get("location", "Unknown")
     )
+
+    # Chat summaries variable (per user)
+    user_id = None
+    if user:
+        if isinstance(user, dict):
+            user_id = user.get("id") or user.get("user_id")
+        else:
+            user_id = getattr(user, "id", None)
+
+    if "{{CHAT_SUMMARIES}}" in template:
+        template = template.replace(
+            "{{CHAT_SUMMARIES}}", build_chat_summaries_variable(user_id)
+        )
 
     if "{{MEMORIES}}" in template:
         template = template.replace("{{MEMORIES}}", build_memories_variable())

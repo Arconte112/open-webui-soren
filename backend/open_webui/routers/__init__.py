@@ -8,6 +8,7 @@ __all__ = [
     "retrieval",
     "pipelines",
     "tasks",
+    "chat_summaries",
     "auths",
     "channels",
     "chats",

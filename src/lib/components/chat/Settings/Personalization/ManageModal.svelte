@@ -27,6 +27,7 @@
 
 	let loading = false;
 	let memories: MemoryEntry[] = [];
+	let search = '';
 	let activeTab: string = 'all';
 	let selectedMemory: MemoryEntry | null = null;
 	let showAddMemoryModal = false;
@@ -44,7 +45,13 @@
 		});
 
 		if (data) {
-			memories = data;
+			memories = data
+				.map((m) => m)
+				.sort((a, b) => {
+					const at = a.updated_at ?? a.created_at ?? '';
+					const bt = b.updated_at ?? b.created_at ?? '';
+					return (bt || '').localeCompare(at || '');
+				});
 		}
 
 		loading = false;
@@ -95,17 +102,21 @@
 		}
 	}
 
-	$: visibleMemories = memories.filter((memory) => {
-		if (activeTab === 'all') {
-			return true;
-		}
-
-		const categoryKey = memory.category?.trim()
-			? memory.category.trim()
-			: UNCATEGORIZED_KEY;
-
-		return categoryKey === activeTab;
-	});
+	$: visibleMemories = memories
+		.filter((memory) => {
+			if (activeTab !== 'all') {
+				const categoryKey = memory.category?.trim()
+					? memory.category.trim()
+					: UNCATEGORIZED_KEY;
+				if (categoryKey !== activeTab) return false;
+			}
+			if (search.trim().length === 0) return true;
+			const term = search.trim().toLowerCase();
+			return (
+				(memory.content ?? '').toLowerCase().includes(term) ||
+				(memory.category ?? '').toLowerCase().includes(term)
+			);
+		});
 
 	const handleDelete = async (memory: MemoryEntry) => {
 		const confirmed =
@@ -158,6 +169,27 @@
 		<div class="flex items-center justify-between px-5 pt-4 pb-2">
 			<div class="text-lg font-medium">Memorias</div>
 			<div class="flex items-center space-x-2">
+				<div class="relative">
+					<input
+						class="pl-8 pr-3 py-1.5 rounded-full text-sm border border-gray-200 dark:border-gray-800 bg-transparent"
+						placeholder="Buscar memorias..."
+						bind:value={search}
+					/>
+					<svg
+						class="w-4 h-4 absolute left-2 top-1/2 -translate-y-1/2 text-gray-400"
+						xmlns="http://www.w3.org/2000/svg"
+						fill="none"
+						viewBox="0 0 24 24"
+						stroke-width="1.5"
+						stroke="currentColor"
+					>
+						<path
+							stroke-linecap="round"
+							stroke-linejoin="round"
+							d="m21 21-3.5-3.5M5 11a6 6 0 1 1 12 0 6 6 0 0 1-12 0Z"
+						/>
+					</svg>
+				</div>
 				<button
 					class="rounded-full p-2 hover:bg-black/5 dark:hover:bg-white/5"
 					on:click={() => {
