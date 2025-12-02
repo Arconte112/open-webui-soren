@@ -60,4 +60,4 @@ export const saveChatSummarySettings = (
 	});
 
 export const getChatSummaries = (token: string, limit = 20) =>
-	request<ChatSummaryItem[]>(token, `/chat-summaries?limit=${limit}`, { method: 'GET' });
+	request<ChatSummaryItem[]>(token, `/chat-summaries/?limit=${limit}`, { method: 'GET' });
