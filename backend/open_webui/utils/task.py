@@ -112,19 +112,20 @@ def build_memories_variable() -> str:
         _MEMORIES_CACHE_WARMED = True
         return ""
 
-    grouped_memories: dict[str, list[tuple[int, str]]] = defaultdict(list)
-    for index, row in enumerate(rows, start=1):
+    grouped_memories: dict[str, list[tuple[str, str]]] = defaultdict(list)
+    for row in rows:
         content = row.get("content")  # RowMapping supports get()
         category = row.get("category")
+        memory_id = row.get("id")
         grouped_memories[str(category or "uncategorized")].append(
-            (index, str(content or ""))
+            (str(memory_id), str(content or ""))
         )
 
     sections = []
     for category, entries in grouped_memories.items():
         lines = [category]
-        for index, content in entries:
-            lines.append(f"{index}. {content}".strip())
+        for memory_id, content in entries:
+            lines.append(f"[ID:{memory_id}] {content}".strip())
         sections.append("\n".join(lines))
 
     result = "\n\n".join(sections)
