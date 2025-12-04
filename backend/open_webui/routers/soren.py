@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field
 from open_webui.env import SRC_LOG_LEVELS, AIOHTTP_CLIENT_SESSION_SSL
 from open_webui.models.chats import ChatForm, Chats
 from open_webui.models.models import Models
+from open_webui.models.tools import Tools
 from open_webui.utils.auth import get_verified_user
 
 
@@ -70,12 +71,20 @@ def build_history(prompt: str, assistant_id: str) -> dict:
     }
 
 
-def extract_tool_ids(model_meta: Optional[dict]) -> list[str]:
-    if not isinstance(model_meta, dict):
-        return []
+def extract_tool_ids(model_meta: Optional[dict], model_params: Optional[dict]) -> list[str]:
+    """
+    Extract tool identifiers from model metadata/params.
+    """
+    candidates: list[str] = []
 
-    tool_ids = model_meta.get("toolIds") or model_meta.get("tools") or []
-    return tool_ids if isinstance(tool_ids, list) else []
+    for source in (model_meta, model_params):
+        if isinstance(source, dict):
+            tool_ids = source.get("toolIds") or source.get("tools") or []
+            if isinstance(tool_ids, list):
+                candidates.extend(tool_ids)
+
+    # Preserve order while removing duplicates
+    return list(dict.fromkeys(candidates))
 
 
 @router.post("/call")
@@ -98,7 +107,11 @@ async def soren_call(
             detail="Model 'soren' not found.",
         )
 
-    tool_ids = extract_tool_ids(model_info.meta)
+    tool_ids = extract_tool_ids(model_info.meta, model_info.params)
+
+    # Fallback: workspace tools the user can read (default-enabled)
+    if not tool_ids:
+        tool_ids = [tool.id for tool in Tools.get_tools_by_user_id(user.id, "read")]
 
     assistant_message_id = str(uuid.uuid4())
     history_payload = build_history(prompt, assistant_message_id)
@@ -134,7 +147,7 @@ async def soren_call(
     base_url = str(request.base_url).rstrip("/")
     target_url = f"{base_url}/api/chat/completions"
 
-    session_id = f"session-{uuid.uuid4().hex}"
+    session_id = f"soren-{uuid.uuid4().hex}"
 
     payload = {
         "model": MODEL_ID,
@@ -144,10 +157,10 @@ async def soren_call(
                 "content": prompt,
             }
         ],
-        "stream": False,
-        "session_id": session_id,
+        "stream": True,
         "chat_id": chat_id,
         "id": assistant_message_id,
+        "session_id": session_id,
         "params": {"function_calling": "default"},
         "background_tasks": {
             "title_generation": True,

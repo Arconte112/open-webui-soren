@@ -1726,6 +1726,7 @@ async def chat_completion(
         metadata.get("session_id")
         and metadata.get("chat_id")
         and metadata.get("message_id")
+        and not metadata.get("no_task", False)
     ):
         # Asynchronous Chat Processing
         task_id, _ = await create_task(
