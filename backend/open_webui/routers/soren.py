@@ -136,7 +136,7 @@ async def soren_call(
             chat={
                 "id": "",
                 "title": "New Chat",
-                "models": [MODEL_ID],
+                "models": [model_id],
                 "params": {},
                 "system": None,
                 "history": history_payload["history"],
