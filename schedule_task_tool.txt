@@ -17,6 +17,16 @@
         "type": "boolean",
         "description": "Si es true, además de ejecutar el prompt se envía una notificación externa.",
         "default": false
+      },
+      "recurrence": {
+        "type": "string",
+        "description": "Recurrencia opcional: daily, weekly o monthly.",
+        "enum": ["daily", "weekly", "monthly"]
+      },
+      "recurrence_end": {
+        "type": "string",
+        "description": "Fecha/hora límite ISO8601 UTC para la recurrencia (null = infinita).",
+        "format": "date-time"
       }
     },
     "required": ["prompt", "run_at"]

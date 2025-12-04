@@ -2,15 +2,26 @@ import logging
 from datetime import datetime, timezone
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
 
 from open_webui.scheduled_tasks.repository import create_task
 from open_webui.utils.auth import get_verified_user
+from open_webui.config import SCHEDULED_TASK_MODEL
+
+ALLOWED_RECURRENCE = {"daily", "weekly", "monthly"}
 
 log = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+class ScheduledTasksConfigPayload(BaseModel):
+    model_id: Optional[str] = None
+
+
+class ScheduledTasksConfigResponse(BaseModel):
+    model_id: str
 
 
 class ScheduleTaskBody(BaseModel):
@@ -23,18 +34,51 @@ class ScheduleTaskBody(BaseModel):
         default=False,
         description="Si es true, además de ejecutar el prompt se enviará una notificación externa.",
     )
+    recurrence: Optional[str] = Field(
+        default=None,
+        description="Recurrencia: daily | weekly | monthly",
+    )
+    recurrence_end: Optional[str] = Field(
+        default=None,
+        description="Fecha/hora límite ISO8601 (UTC). Null = infinita.",
+    )
 
 
 class ScheduledTaskResponse(BaseModel):
     id: int
     prompt: str
     run_at: datetime
+    recurrence: Optional[str]
+    recurrence_end: Optional[datetime]
     notify: bool
     status: str
     created_at: datetime
     executed_at: Optional[datetime] = None
     last_error: Optional[str] = None
     last_response_preview: Optional[str] = None
+
+
+@router.get(
+    "/config",
+    response_model=ScheduledTasksConfigResponse,
+    summary="Lee la configuración de tareas programadas",
+)
+def get_scheduled_tasks_config(request: Request, user=Depends(get_verified_user)):
+    model_id = request.app.state.config.SCHEDULED_TASK_MODEL or SCHEDULED_TASK_MODEL.value
+    return ScheduledTasksConfigResponse(model_id=model_id)
+
+
+@router.post(
+    "/config",
+    response_model=ScheduledTasksConfigResponse,
+    summary="Actualiza la configuración de tareas programadas",
+)
+def update_scheduled_tasks_config(
+    payload: ScheduledTasksConfigPayload, request: Request, user=Depends(get_verified_user)
+):
+    new_model_id = (payload.model_id or "").strip() or "soren"
+    request.app.state.config.SCHEDULED_TASK_MODEL = new_model_id
+    return ScheduledTasksConfigResponse(model_id=new_model_id)
 
 
 def _parse_run_at(value: str) -> datetime:
@@ -60,6 +104,34 @@ def _parse_run_at(value: str) -> datetime:
     return parsed.astimezone(timezone.utc)
 
 
+def _parse_recurrence(value: Optional[str]) -> Optional[str]:
+    if value is None:
+        return None
+    value = value.strip().lower()
+    if value and value not in ALLOWED_RECURRENCE:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"recurrence debe ser uno de {sorted(ALLOWED_RECURRENCE)}",
+        )
+    return value or None
+
+
+def _parse_recurrence_end(value: Optional[str]) -> Optional[datetime]:
+    if not value:
+        return None
+    normalized = value.strip().replace("Z", "+00:00")
+    try:
+        parsed = datetime.fromisoformat(normalized)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="recurrence_end debe tener formato ISO8601 válido.",
+        ) from exc
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
 @router.post(
     "/",
     response_model=ScheduledTaskResponse,
@@ -78,9 +150,17 @@ def schedule_task(
         )
 
     run_at = _parse_run_at(form_data.run_at)
+    recurrence = _parse_recurrence(form_data.recurrence)
+    recurrence_end = _parse_recurrence_end(form_data.recurrence_end)
 
     try:
-        task = create_task(prompt=prompt, run_at=run_at, notify=form_data.notify)
+        task = create_task(
+            prompt=prompt,
+            run_at=run_at,
+            notify=form_data.notify,
+            recurrence=recurrence,
+            recurrence_end=recurrence_end,
+        )
     except HTTPException:
         raise
     except Exception as exc:  # pylint: disable=broad-except
@@ -94,6 +174,8 @@ def schedule_task(
         id=task.id,
         prompt=task.prompt,
         run_at=task.run_at,
+        recurrence=task.recurrence,
+        recurrence_end=task.recurrence_end,
         notify=task.notify,
         status=task.status,
         created_at=task.created_at,

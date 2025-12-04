@@ -13,7 +13,8 @@ import os
 import sys
 import time
 import traceback
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
+import calendar
 from typing import Any, Optional
 import urllib.error
 import urllib.request
@@ -39,9 +40,11 @@ from open_webui.scheduled_tasks.repository import (  # noqa: E402
     update_task_status,
     update_last_error,
     update_last_response_preview,
+    reschedule_task,
     STATUS_RUNNING,
     STATUS_DONE,
     STATUS_FAILED,
+    STATUS_COMPLETED,
 )
 
 DEFAULT_SLEEP_SECONDS = int(os.getenv("SCHEDULED_TASKS_SLEEP", "60"))
@@ -97,6 +100,23 @@ def post_notify(task_id: int, task_prompt: str, run_at: datetime, content: str, 
         response.read()
 
 
+def _next_run(current: datetime, recurrence: str) -> Optional[datetime]:
+    rec = (recurrence or "").lower()
+    if rec == "daily":
+        return current + timedelta(days=1)
+    if rec == "weekly":
+        return current + timedelta(days=7)
+    if rec == "monthly":
+        year = current.year
+        month = current.month + 1
+        if month == 13:
+            month = 1
+            year += 1
+        day = min(current.day, calendar.monthrange(year, month)[1])
+        return current.replace(year=year, month=month, day=day)
+    return None
+
+
 def run_once(base_url: str, token: str) -> None:
     now = datetime.now(timezone.utc)
     tasks = get_due_tasks(now)
@@ -137,8 +157,27 @@ def run_once(base_url: str, token: str) -> None:
                     assistant_message_id=assistant_message_id,
                 )
 
-            update_task_status(task_id, STATUS_DONE, executed_at=datetime.now(timezone.utc))
-            print(f"[scheduled_tasks] Tarea {task_id} finalizada (status=done, notified={task.notify})")
+            now_exec = datetime.now(timezone.utc)
+            if task.recurrence:
+                next_run = _next_run(task.run_at, task.recurrence)
+                if next_run and (task.recurrence_end is None or next_run <= task.recurrence_end):
+                    reschedule_task(
+                        task_id=task_id,
+                        next_run_at=next_run,
+                        status=STATUS_PENDING,
+                        executed_at=None,
+                    )
+                    print(
+                        f"[scheduled_tasks] Tarea {task_id} finalizada y reprogramada a {next_run.isoformat()} (recurrence={task.recurrence})"
+                    )
+                else:
+                    update_task_status(task_id, STATUS_COMPLETED, executed_at=now_exec)
+                    print(
+                        f"[scheduled_tasks] Tarea {task_id} finalizada y marcada completed (recurrence end reached)"
+                    )
+            else:
+                update_task_status(task_id, STATUS_DONE, executed_at=now_exec)
+                print(f"[scheduled_tasks] Tarea {task_id} finalizada (status=done, notified={task.notify})")
         except Exception as exc:  # pylint: disable=broad-except
             err_text = f"{exc}"
             trace = traceback.format_exc()

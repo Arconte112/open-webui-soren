@@ -5,8 +5,9 @@ import re
 import time
 import uuid
 from collections import defaultdict
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from typing import Optional, Any
+from zoneinfo import ZoneInfo
 
 
 from open_webui.utils.misc import get_last_user_message, get_messages_content
@@ -31,6 +32,12 @@ _MEMORIES_CACHE_WARMED: bool = False
 # Chat summaries cache (per user)
 CHAT_SUMMARIES_CACHE_TTL = int(os.getenv("CHAT_SUMMARIES_CACHE_TTL", "300"))
 _CHAT_SUMMARIES_CACHE: dict[str, tuple[float, int, str]] = {}
+
+# Scheduled tasks cache
+SCHEDULED_TASKS_CACHE_TTL = int(os.getenv("SCHEDULED_TASKS_CACHE_TTL", "60"))
+_SCHEDULED_TASKS_CACHE: tuple[float, str] | None = None
+
+SANTO_DOMINGO_TZ = ZoneInfo("America/Santo_Domingo")
 
 
 def get_memories_engine() -> Engine | None:
@@ -250,6 +257,84 @@ def build_chat_summaries_variable(user_id: Optional[str]) -> str:
     return result
 
 
+def _convert_run_at_to_santo_domingo(run_at: Any) -> str:
+    if not run_at:
+        return ""
+
+    dt = run_at
+    if isinstance(dt, str):
+        try:
+            dt = datetime.fromisoformat(dt.replace("Z", "+00:00"))
+        except ValueError:
+            return str(run_at)
+
+    if not isinstance(dt, datetime):
+        return str(run_at)
+
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    else:
+        dt = dt.astimezone(timezone.utc)
+
+    local_dt = dt.astimezone(SANTO_DOMINGO_TZ)
+    return local_dt.strftime("%Y-%m-%d %H:%M")
+
+
+def _shorten_task_prompt(prompt: Any) -> str:
+    if prompt is None:
+        return ""
+
+    text = str(prompt).replace("\r\n", "\n")
+    first_line = text.split("\n", 1)[0]
+    return first_line.rstrip()
+
+
+def build_scheduled_tasks_pending_variable() -> str:
+    global _SCHEDULED_TASKS_CACHE
+
+    if _SCHEDULED_TASKS_CACHE is not None:
+        cached_at, cached_value = _SCHEDULED_TASKS_CACHE
+        if time.time() - cached_at < SCHEDULED_TASKS_CACHE_TTL:
+            return cached_value
+
+    engine = get_memories_engine()
+    if engine is None:
+        result = "<tareas_programadas_pendientes>\nNinguna\n</tareas_programadas_pendientes>"
+        _SCHEDULED_TASKS_CACHE = (time.time(), result)
+        return result
+
+    try:
+        with engine.connect() as conn:
+            rows = conn.execute(
+                text(
+                    "SELECT id, prompt, run_at, recurrence "
+                    "FROM scheduled_tasks "
+                    "WHERE status = 'pending' "
+                    "ORDER BY run_at ASC"
+                )
+            ).mappings().all()
+    except SQLAlchemyError as exc:
+        log.error("Failed to fetch scheduled tasks: %s", exc)
+        result = "<tareas_programadas_pendientes>\nNinguna\n</tareas_programadas_pendientes>"
+        _SCHEDULED_TASKS_CACHE = (time.time(), result)
+        return result
+
+    lines = ["<tareas_programadas_pendientes>"]
+
+    if not rows:
+        lines.append("Ninguna")
+    else:
+        for row in rows:
+            run_at = _convert_run_at_to_santo_domingo(row.get("run_at"))
+            description = _shorten_task_prompt(row.get("prompt"))
+            lines.append(f"- {run_at} | {description}".rstrip())
+
+    lines.append("</tareas_programadas_pendientes>")
+    result = "\n".join(lines)
+    _SCHEDULED_TASKS_CACHE = (time.time(), result)
+    return result
+
+
 def is_memories_cache_warm() -> bool:
     if _MEMORIES_CACHE is None or not _MEMORIES_CACHE_WARMED:
         return False
@@ -359,6 +444,13 @@ def prompt_template(template: str, user: Optional[Any] = None) -> str:
     if "{{CHAT_SUMMARIES}}" in template:
         template = template.replace(
             "{{CHAT_SUMMARIES}}", build_chat_summaries_variable(user_id)
+        )
+
+    if "{{SCHEDULED_TASKS_PENDING}}" in template or "{{TAREAS_PROGRAMADAS_PENDIENTES}}" in template:
+        scheduled_tasks = build_scheduled_tasks_pending_variable()
+        template = template.replace("{{SCHEDULED_TASKS_PENDING}}", scheduled_tasks)
+        template = template.replace(
+            "{{TAREAS_PROGRAMADAS_PENDIENTES}}", scheduled_tasks
         )
 
     if "{{CALENDAR}}" in template or "{{CALENDARIO}}" in template:

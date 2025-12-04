@@ -1,5 +1,10 @@
 # Repository Guidelines
 
+## Actualizaciones Recientes
+- 2025-12-04: Personalización: sección para fijar el Model ID usado por las tareas programadas (persistente global); lista de resúmenes de chats ahora se despliega con un botón y está oculta por defecto.
+- 2025-12-04: Se agrego la variable `{{SCHEDULED_TASKS_PENDING}}` / `{{TAREAS_PROGRAMADAS_PENDIENTES}}` en el system prompt; consulta `scheduled_tasks` (status `pending`) en la base externa, convierte `run_at` a America/Santo_Domingo, recorta el `prompt` a 100 caracteres o hasta el primer salto de linea y devuelve un bloque `<tareas_programadas_pendientes>` con "Ninguna" cuando no hay filas (cache 60s configurable con `SCHEDULED_TASKS_CACHE_TTL`).
+- 2025-12-04: Personalización: sección para fijar el Model ID usado por las tareas programadas (persistente global); la lista de resúmenes de chats ahora está oculta por defecto y se despliega con un botón.
+
 ## Project Structure & Module Organization
 Frontend code sits in `src/`: routes in `src/routes/(app)`, components in `src/lib/components`, locale bundles in `src/lib/i18n`, static assets in `static/`. Backend logic lives in `backend/open_webui`; `main.py` mounts routers from `backend/open_webui/routers`, data models under `backend/open_webui/models`, and migrations/utilities inside `backend/open_webui/internal`. Persistent data lives in `backend/data`, Cypress specs in `cypress/`, and deployment helpers at the repo root.
 

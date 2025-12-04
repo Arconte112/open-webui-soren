@@ -1714,6 +1714,13 @@ TASK_MODEL_EXTERNAL = PersistentConfig(
     os.environ.get("TASK_MODEL_EXTERNAL", ""),
 )
 
+# Modelo usado por las tareas programadas de Soren
+SCHEDULED_TASK_MODEL = PersistentConfig(
+    "SCHEDULED_TASK_MODEL",
+    "task.scheduled.model",
+    os.environ.get("SCHEDULED_TASK_MODEL", "soren"),
+)
+
 TITLE_GENERATION_PROMPT_TEMPLATE = PersistentConfig(
     "TITLE_GENERATION_PROMPT_TEMPLATE",
     "task.title.prompt_template",

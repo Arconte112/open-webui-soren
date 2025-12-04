@@ -1,8 +1,9 @@
 <script lang="ts">
-	import { createEventDispatcher } from 'svelte';
+import { createEventDispatcher } from 'svelte';
 
-	import ManageModal from './Personalization/ManageModal.svelte';
-	import ChatSummariesSection from './Personalization/ChatSummariesSection.svelte';
+import ManageModal from './Personalization/ManageModal.svelte';
+import ChatSummariesSection from './Personalization/ChatSummariesSection.svelte';
+import ScheduledTasksSection from './Personalization/ScheduledTasksSection.svelte';
 
 	const dispatch = createEventDispatcher();
 
@@ -45,6 +46,10 @@
 					Abrir gestor de memorias
 				</button>
 			</div>
+		</div>
+
+		<div class="border border-gray-100 dark:border-gray-800 rounded-2xl p-4">
+			<ScheduledTasksSection />
 		</div>
 
 		<div class="border border-gray-100 dark:border-gray-800 rounded-2xl p-4">

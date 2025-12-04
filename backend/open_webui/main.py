@@ -420,6 +420,7 @@ from open_webui.config import (
     # Tasks
     TASK_MODEL,
     TASK_MODEL_EXTERNAL,
+    SCHEDULED_TASK_MODEL,
     ENABLE_TAGS_GENERATION,
     ENABLE_TITLE_GENERATION,
     ENABLE_FOLLOW_UP_GENERATION,
@@ -1204,6 +1205,7 @@ app.state.speech_speaker_embeddings_dataset = None
 
 app.state.config.TASK_MODEL = TASK_MODEL
 app.state.config.TASK_MODEL_EXTERNAL = TASK_MODEL_EXTERNAL
+app.state.config.SCHEDULED_TASK_MODEL = SCHEDULED_TASK_MODEL
 
 
 app.state.config.ENABLE_SEARCH_QUERY_GENERATION = ENABLE_SEARCH_QUERY_GENERATION

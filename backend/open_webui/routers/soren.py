@@ -21,7 +21,7 @@ log.setLevel(SRC_LOG_LEVELS["MAIN"])
 
 router = APIRouter()
 
-MODEL_ID = "soren"
+DEFAULT_MODEL_ID = "soren"
 API_TOKEN = "sk-7e7b1636fec4427a8e1cfe9a217984a1"
 
 
@@ -33,7 +33,15 @@ class SorenCallBody(BaseModel):
     )
 
 
-def build_history(prompt: str, assistant_id: str) -> dict:
+def _get_model_id(request: Request) -> str:
+    try:
+        value = request.app.state.config.SCHEDULED_TASK_MODEL
+        return value or DEFAULT_MODEL_ID
+    except Exception:
+        return DEFAULT_MODEL_ID
+
+
+def build_history(prompt: str, assistant_id: str, model_id: str) -> dict:
     user_message_id = str(uuid.uuid4())
     timestamp = int(time.time())
 
@@ -44,7 +52,7 @@ def build_history(prompt: str, assistant_id: str) -> dict:
         "role": "user",
         "content": prompt,
         "timestamp": timestamp,
-        "models": [MODEL_ID],
+        "models": [model_id],
     }
 
     assistant_message = {
@@ -53,8 +61,8 @@ def build_history(prompt: str, assistant_id: str) -> dict:
         "childrenIds": [],
         "role": "assistant",
         "content": "",
-        "model": MODEL_ID,
-        "modelName": MODEL_ID,
+        "model": model_id,
+        "modelName": model_id,
         "modelIdx": 0,
         "timestamp": timestamp,
     }
@@ -105,11 +113,13 @@ async def soren_call(
             detail="Prompt cannot be empty.",
         )
 
-    model_info = Models.get_model_by_id(MODEL_ID)
+    model_id = _get_model_id(request)
+
+    model_info = Models.get_model_by_id(model_id)
     if not model_info:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Model 'soren' not found.",
+            detail=f"Model '{model_id}' not found.",
         )
 
     tool_ids = extract_tool_ids(model_info.meta, model_info.params)
@@ -119,7 +129,7 @@ async def soren_call(
         tool_ids = [tool.id for tool in Tools.get_tools_by_user_id(user.id, "read")]
 
     assistant_message_id = str(uuid.uuid4())
-    history_payload = build_history(prompt, assistant_message_id)
+    history_payload = build_history(prompt, assistant_message_id, model_id)
 
     try:
         chat_form = ChatForm(
@@ -155,7 +165,7 @@ async def soren_call(
     session_id = f"soren-{uuid.uuid4().hex}"
 
     payload = {
-        "model": MODEL_ID,
+        "model": model_id,
         "messages": [
             {
                 "role": "user",

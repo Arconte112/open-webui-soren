@@ -25,6 +25,8 @@ let prompt = DEFAULT_PROMPT;
 let maxItems = 15;
 let updatedAt: string | null = null;
 
+let showSummaries = false;
+
 	let loading = true;
 	let saving = false;
 	let summariesLoading = false;
@@ -190,43 +192,53 @@ let updatedAt: string | null = null;
 		>
 			{summariesLoading ? 'Actualizando...' : 'Refrescar lista'}
 		</button>
+		<button
+			type="button"
+			class="px-3.5 py-1.5 text-sm font-medium hover:bg-black/5 dark:hover:bg-white/5 rounded-full disabled:opacity-60"
+			on:click={() => (showSummaries = !showSummaries)}
+			disabled={summariesLoading}
+		>
+			{showSummaries ? 'Ocultar resúmenes' : 'Ver resúmenes'}
+		</button>
 	</div>
 
-	<div class="space-y-2">
-		<div class="flex items-center justify-between">
-			<div class="text-sm font-medium">Últimos resúmenes ({maxItems || 15})</div>
+	{#if showSummaries}
+		<div class="space-y-2">
+			<div class="flex items-center justify-between">
+				<div class="text-sm font-medium">Últimos resúmenes ({maxItems || 15})</div>
+				{#if summariesLoading}
+					<div class="text-xs text-gray-500">Cargando…</div>
+				{/if}
+			</div>
+
 			{#if summariesLoading}
-				<div class="text-xs text-gray-500">Cargando…</div>
+				<div class="flex justify-center py-10">
+					<Spinner />
+				</div>
+			{:else if summaries.length === 0}
+				<div class="text-sm text-gray-500 py-6 text-center">
+					Todavía no hay resúmenes generados.
+				</div>
+			{:else}
+				<div class="space-y-3">
+					{#each summaries as item (item.chat_id)}
+						<div class="border border-gray-100 dark:border-gray-800 rounded-xl p-4 space-y-2">
+							<div class="flex items-center justify-between text-xs text-gray-500">
+								<span class="font-mono text-[0.75rem]">{item.chat_id}</span>
+								<span>{formatDate(item.created_at)}</span>
+							</div>
+							<div class="text-sm leading-relaxed whitespace-pre-line">
+								{item.summary ?? 'null (sin contenido relevante)'}
+							</div>
+							{#if item.expires_at}
+								<div class="text-[0.7rem] text-gray-500">
+									Conservado (fecha de retención): {formatDate(item.expires_at)}
+								</div>
+							{/if}
+						</div>
+					{/each}
+				</div>
 			{/if}
 		</div>
-
-		{#if summariesLoading}
-			<div class="flex justify-center py-10">
-				<Spinner />
-			</div>
-		{:else if summaries.length === 0}
-			<div class="text-sm text-gray-500 py-6 text-center">
-				Todavía no hay resúmenes generados.
-			</div>
-		{:else}
-			<div class="space-y-3">
-				{#each summaries as item (item.chat_id)}
-					<div class="border border-gray-100 dark:border-gray-800 rounded-xl p-4 space-y-2">
-						<div class="flex items-center justify-between text-xs text-gray-500">
-							<span class="font-mono text-[0.75rem]">{item.chat_id}</span>
-							<span>{formatDate(item.created_at)}</span>
-						</div>
-						<div class="text-sm leading-relaxed whitespace-pre-line">
-							{item.summary ?? 'null (sin contenido relevante)'}
-						</div>
-						{#if item.expires_at}
-							<div class="text-[0.7rem] text-gray-500">
-								Conservado (fecha de retención): {formatDate(item.expires_at)}
-							</div>
-						{/if}
-					</div>
-				{/each}
-			</div>
-		{/if}
-	</div>
+	{/if}
 </div>

@@ -840,6 +840,14 @@ export const cleanText = (content: string) => {
 	return removeFormattings(removeEmojis(content.trim()));
 };
 
+// Strip content marked as "do not read" for TTS. The text outside the
+// triple-pipe delimiters will remain available for splitting/playback.
+// It also removes any unterminated block (open "|||" without a closing
+// "|||") to avoid speaking partial content while streaming.
+export const stripTTSExclusionBlocks = (content: string) => {
+	return content.replace(/\|\|\|[\s\S]*?(?:\|\|\||$)/g, '');
+};
+
 export const removeDetails = (content, types) => {
 	for (const type of types) {
 		content = content.replace(
@@ -948,6 +956,9 @@ export const extractSentencesForAudio = (text: string) => {
 
 export const getMessageContentParts = (content: string, splitOn: string = 'punctuation') => {
 	const messageContentParts: string[] = [];
+
+	// Remove TTS exclusion blocks before any sentence/paragraph splitting
+	content = stripTTSExclusionBlocks(content);
 
 	switch (splitOn) {
 		default:

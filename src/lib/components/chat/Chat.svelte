@@ -611,7 +611,7 @@
 		}
 
 		showControlsSubscribe = showControls.subscribe(async (value) => {
-			if (controlPane && !$mobile) {
+			if (controlPane) {
 				try {
 					if (value) {
 						controlPaneComponent.openPane();

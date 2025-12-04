@@ -43,6 +43,7 @@
 	let mediaRecorder;
 	let audioStream = null;
 	let audioChunks = [];
+	let micMuted = false;
 
 	let videoInputDevices = [];
 	let selectedVideoInputDeviceId = null;
@@ -217,6 +218,7 @@
 				tracks.forEach((track) => track.stop());
 			}
 			audioStream = null;
+			micMuted = false;
 		}
 	};
 
@@ -269,6 +271,29 @@
 		});
 
 		audioStream = null;
+		micMuted = false;
+	};
+
+	const setMicEnabled = (enabled: boolean) => {
+		if (!audioStream) return;
+		audioStream.getAudioTracks().forEach((track) => {
+			track.enabled = enabled;
+		});
+		micMuted = !enabled;
+	};
+
+	const toggleMicMute = async () => {
+		if (!audioStream) {
+			audioStream = await navigator.mediaDevices.getUserMedia({
+				audio: {
+					echoCancellation: true,
+					noiseSuppression: true,
+					autoGainControl: true
+				}
+			});
+		}
+
+		setMicEnabled(micMuted); // flips current state
 	};
 
 	// Function to calculate the RMS level from time domain data
@@ -691,7 +716,7 @@
 </script>
 
 {#if $showCallOverlay}
-	<div class="max-w-lg w-full h-full max-h-[100dvh] flex flex-col justify-between p-3 md:p-6">
+	<div class="w-[360px] max-w-[90vw] h-full max-h-[100dvh] flex flex-col justify-between p-3 md:p-6">
 		{#if camera}
 			<button
 				type="button"
@@ -878,7 +903,7 @@
 		</div>
 
 		<div class="flex justify-between items-center pb-2 w-full">
-			<div>
+			<div class="flex items-center gap-2">
 				{#if camera}
 					<VideoInputMenu
 						devices={videoInputDevices}
@@ -936,6 +961,52 @@
 						</button>
 					</Tooltip>
 				{/if}
+
+				<Tooltip content={micMuted ? $i18n.t('Unmute mic') : $i18n.t('Mute mic')}>
+					<button
+						class="p-3 rounded-full bg-gray-50 dark:bg-gray-900"
+						type="button"
+						aria-pressed={micMuted}
+						on:click={toggleMicMute}
+					>
+						{#if micMuted}
+							<svg
+								xmlns="http://www.w3.org/2000/svg"
+								fill="none"
+								viewBox="0 0 24 24"
+								stroke-width="1.5"
+								stroke="currentColor"
+								class="size-5"
+							>
+								<path
+									stroke-linecap="round"
+									stroke-linejoin="round"
+									d="M19.5 12a7.5 7.5 0 0 1-7.5 7.5m0 0V21m0-1.5H9m3 0h3M4.5 12c0 1.493.44 2.884 1.2 4.05m0 0L3 18.75m2.7-2.7L8.25 15M12 4.5v6m0 0a2.25 2.25 0 0 0 4.5 0V9m-4.5 1.5a2.25 2.25 0 0 1-3.63 1.74M8.37 12.24 5.25 9.75m7.5-5.25L9 6.75"
+								/>
+							</svg>
+						{:else}
+							<svg
+								xmlns="http://www.w3.org/2000/svg"
+								fill="none"
+								viewBox="0 0 24 24"
+								stroke-width="1.5"
+								stroke="currentColor"
+								class="size-5"
+							>
+								<path
+									stroke-linecap="round"
+									stroke-linejoin="round"
+									d="M12 4.5a3 3 0 0 0-3 3V12a3 3 0 1 0 6 0V7.5a3 3 0 0 0-3-3Z"
+								/>
+								<path
+									stroke-linecap="round"
+									stroke-linejoin="round"
+									d="M19.5 12a7.5 7.5 0 0 1-15 0M12 18.75V21m0-2.25h3m-3 0H9"
+								/>
+							</svg>
+						{/if}
+					</button>
+				</Tooltip>
 			</div>
 
 			<div>
