@@ -1,0 +1,93 @@
+"""
+title: Programar tarea con Soren (DB directa)
+description: Inserta una tarea en la tabla scheduled_tasks de la BD externa (sin usar el endpoint HTTP).
+version: 1.1.0
+author: arconte
+required_open_webui_version: 0.6.0
+requirements: psycopg2-binary
+"""
+
+from __future__ import annotations
+
+import os
+from datetime import datetime
+from typing import Optional
+
+import psycopg2
+from psycopg2.extras import RealDictCursor
+from pydantic import BaseModel, Field
+
+
+class Tools:
+    class Valves(BaseModel):
+        DATABASE_URL: str = Field(
+            default=os.getenv(
+                "SCHEDULED_TASKS_DATABASE_URL",
+                "postgresql://postgres:zFns3MZAQNnZ2UVj3q41j1kJn0ORdfJ9qNjHU7skR7ev50Ugi9y7aGOsrFlBbQPs@5.78.120.77:5434/soren_openwebui",
+            ),
+            description="Cadena de conexión a Postgres para scheduled_tasks.",
+        )
+
+    def __init__(self):
+        self.valves = self.Valves()
+
+    def _ensure_table(self, cur) -> None:
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS scheduled_tasks (
+                id SERIAL PRIMARY KEY,
+                prompt TEXT NOT NULL,
+                run_at TIMESTAMPTZ NOT NULL,
+                notify BOOLEAN NOT NULL DEFAULT FALSE,
+                status TEXT NOT NULL DEFAULT 'pending',
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                executed_at TIMESTAMPTZ,
+                last_error TEXT,
+                last_response_preview TEXT,
+                CONSTRAINT scheduled_tasks_status_check CHECK (status IN ('pending','running','done','failed'))
+            );
+            CREATE INDEX IF NOT EXISTS scheduled_tasks_pending_idx ON scheduled_tasks (status, run_at);
+            """
+        )
+
+    async def schedule_task(
+        self,
+        prompt: str,
+        run_at: str,
+        notify: bool = False,
+    ) -> dict:
+        """
+        Crea una tarea programada para Soren.
+
+        :param prompt: Instrucción completa que se ejecutará en el futuro.
+        :param run_at: Fecha/hora ISO8601 (UTC), ej. 2025-12-05T12:00:00Z.
+        :param notify: Si es true, el worker enviará webhook a n8n tras ejecutar.
+        """
+        # Validación ligera de fecha
+        try:
+            datetime.fromisoformat(run_at.replace("Z", "+00:00"))
+        except ValueError as exc:  # pragma: no cover - validación simple
+            return {"error": f"run_at inválido: {exc}"}
+
+        conn = psycopg2.connect(self.valves.DATABASE_URL)
+        conn.autocommit = True
+        with conn, conn.cursor(cursor_factory=RealDictCursor) as cur:
+            self._ensure_table(cur)
+            cur.execute(
+                """
+                INSERT INTO scheduled_tasks (prompt, run_at, notify, status)
+                VALUES (%s, %s, %s, 'pending')
+                RETURNING id, prompt, run_at, notify, status, created_at, executed_at, last_error, last_response_preview;
+                """,
+                (prompt, run_at, notify),
+            )
+            row = cur.fetchone()
+        conn.close()
+
+        def _ser(val):
+            if isinstance(val, datetime):
+                return val.isoformat()
+            return val
+
+        serialized = {k: _ser(v) for k, v in row.items()}
+        return {"inserted": serialized}

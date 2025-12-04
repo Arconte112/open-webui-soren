@@ -28,6 +28,7 @@ __all__ = [
     "utils",
     "scim",
     "soren",
+    "scheduled_tasks",
 ]
 
 for module_name in __all__:

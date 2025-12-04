@@ -96,6 +96,7 @@ from open_webui.routers import (
     utils,
     scim,
     soren,
+    scheduled_tasks,
 )
 
 from open_webui.routers.retrieval import (
@@ -1409,6 +1410,11 @@ app.include_router(chats.router, prefix="/api/v1/chats", tags=["chats"])
 app.include_router(notes.router, prefix="/api/v1/notes", tags=["notes"])
 app.include_router(
     chat_summaries.router, prefix="/api/v1/chat-summaries", tags=["chat-summaries"]
+)
+app.include_router(
+    scheduled_tasks.router,
+    prefix="/api/v1/scheduled-tasks",
+    tags=["scheduled-tasks"],
 )
 
 
