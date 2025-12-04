@@ -2,6 +2,7 @@ import logging
 import time
 import uuid
 import json
+import asyncio
 from typing import Optional
 
 import aiohttp
@@ -26,6 +27,10 @@ API_TOKEN = "sk-7e7b1636fec4427a8e1cfe9a217984a1"
 
 class SorenCallBody(BaseModel):
     prompt: str = Field(..., min_length=1, description="Mensaje para el asistente Soren.")
+    wait_for_response: bool = Field(
+        default=False,
+        description="Si es true, espera la respuesta final y la devuelve en 'response.content'.",
+    )
 
 
 def build_history(prompt: str, assistant_id: str) -> dict:
@@ -218,4 +223,29 @@ async def soren_call(
         "chat_id": chat_id,
         "assistant_message_id": assistant_message_id,
         "response": response_payload,
+        **(
+            {}
+            if not form_data.wait_for_response
+            else {
+                "response": {
+                    "content": await _wait_for_content(chat_id, assistant_message_id),
+                    "chat_response": response_payload,
+                }
+            }
+        ),
     }
+
+
+async def _wait_for_content(chat_id: str, assistant_message_id: str, attempts: int = 180, delay: float = 1.0) -> Optional[str]:
+    """Polls the chat until the assistant message has content or timeout."""
+    for _ in range(attempts):
+        try:
+            chat = Chats.get_chat_by_id(chat_id)
+            messages = chat.chat.get("history", {}).get("messages", {}) if chat else {}
+            content = messages.get(assistant_message_id, {}).get("content")
+            if content:
+                return content
+        except Exception:
+            pass
+        await asyncio.sleep(delay)
+    return None

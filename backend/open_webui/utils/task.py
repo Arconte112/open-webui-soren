@@ -5,7 +5,7 @@ import re
 import time
 import uuid
 from collections import defaultdict
-from datetime import datetime
+from datetime import date, datetime, timedelta
 from typing import Optional, Any
 
 
@@ -55,6 +55,55 @@ def clear_chat_summaries_cache(user_id: Optional[str] = None) -> None:
         _CHAT_SUMMARIES_CACHE.pop(user_id, None)
     else:
         _CHAT_SUMMARIES_CACHE.clear()
+
+
+def build_calendar_variable(months: int = 2) -> str:
+    """
+    Devuelve un calendario compacto desde hoy hacia adelante.
+    Formato por mes: "Dic 2025: L1 M2 X3 J4 V5 S6 D7 | L8 ..."
+    """
+    today = date.today()
+    month_abbr = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"]
+    weekday_abbr = ["L", "M", "X", "J", "V", "S", "D"]  # Monday first
+
+    def month_year_offset(base: date, offset: int) -> tuple[int, int]:
+        month = base.month - 1 + offset
+        year = base.year + month // 12
+        month = month % 12 + 1
+        return year, month
+
+    lines: list[str] = []
+
+    for offset in range(months):
+        year, month = month_year_offset(today, offset)
+        first_day = date(year, month, 1)
+        next_month_year, next_month = month_year_offset(first_day, 1)
+        last_day = date(next_month_year, next_month, 1) - timedelta(days=1)
+
+        start_day = today if (today.year == year and today.month == month) else first_day
+
+        week_chunks: list[str] = []
+        current_week: list[str] = []
+
+        total_days = (last_day - start_day).days + 1
+        for delta in range(total_days):
+            current_day = start_day + timedelta(days=delta)
+
+            # Split weeks when a new Monday arrives (except for the first day)
+            if current_day.weekday() == 0 and current_week:
+                week_chunks.append(" ".join(current_week))
+                current_week = []
+
+            current_week.append(f"{weekday_abbr[current_day.weekday()]}{current_day.day}")
+
+        if current_week:
+            week_chunks.append(" ".join(current_week))
+
+        if week_chunks:
+            line = f"{month_abbr[month - 1]} {year}: " + " | ".join(week_chunks)
+            lines.append(line)
+
+    return "\n".join(lines)
 
 
 def build_memories_variable() -> str:
@@ -311,6 +360,11 @@ def prompt_template(template: str, user: Optional[Any] = None) -> str:
         template = template.replace(
             "{{CHAT_SUMMARIES}}", build_chat_summaries_variable(user_id)
         )
+
+    if "{{CALENDAR}}" in template or "{{CALENDARIO}}" in template:
+        calendar_value = build_calendar_variable()
+        template = template.replace("{{CALENDAR}}", calendar_value)
+        template = template.replace("{{CALENDARIO}}", calendar_value)
 
     if "{{MEMORIES}}" in template:
         template = template.replace("{{MEMORIES}}", build_memories_variable())
