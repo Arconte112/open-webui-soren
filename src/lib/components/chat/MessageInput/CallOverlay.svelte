@@ -1,6 +1,6 @@
 <script lang="ts">
-	import { config, models, settings, showCallOverlay, TTSWorker } from '$lib/stores';
-	import { onMount, tick, getContext, onDestroy, createEventDispatcher } from 'svelte';
+	import { config, settings, showCallOverlay, TTSWorker } from '$lib/stores';
+	import { onMount, tick, onDestroy, createEventDispatcher } from 'svelte';
 
 	const dispatch = createEventDispatcher();
 
@@ -9,13 +9,9 @@
 	import { synthesizeOpenAISpeech, transcribeAudio } from '$lib/apis/audio';
 
 	import { toast } from 'svelte-sonner';
-
-	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import VideoInputMenu from './CallOverlay/VideoInputMenu.svelte';
 	import { KokoroWorker } from '$lib/workers/KokoroWorker';
-	import { WEBUI_API_BASE_URL } from '$lib/constants';
-
-	const i18n = getContext('i18n');
+	import HalVisualizer, { type Emotion, type VisualState } from './CallOverlay/HalVisualizer.svelte';
 
 	export let eventTarget: EventTarget;
 	export let submitPrompt: Function;
@@ -26,12 +22,16 @@
 
 	let wakeLock = null;
 
-	let model = null;
-
 	let loading = false;
 	let confirmed = false;
 	let interrupted = false;
 	let assistantSpeaking = false;
+	let visualState: VisualState = 'idle';
+	let emotion: Emotion = 'neutral';
+	const messageEmotions = new Map<string, Emotion>();
+	const emotionRegex = /^\s*\[E:(neutral|happy|sad|excited)\]\s*/i;
+	const retroButtonClass =
+		'border border-[#ff3333] text-[#ff3333] font-mono text-[11px] tracking-[0.18em] uppercase px-3 py-2 leading-none rounded-sm bg-[rgba(0,0,0,0.6)] transition-all duration-150 hover:shadow-[0_0_12px_rgba(255,51,51,0.35)] hover:border-[#ff4d4d] hover:bg-[rgba(20,0,0,0.7)] active:opacity-80 focus-visible:outline focus-visible:outline-1 focus-visible:outline-[#ff3333]';
 
 	let emoji = null;
 	let camera = false;
@@ -44,6 +44,46 @@
 	let audioStream = null;
 	let audioChunks = [];
 	let micMuted = false;
+	let ttsPlaying = false;
+	let ttsLevel = 0;
+	let ttsAudioContext: AudioContext | null = null;
+	let ttsAnalyser: AnalyserNode | null = null;
+	let ttsSource: MediaElementAudioSourceNode | null = null;
+	let ttsDataArray: Uint8Array | null = null;
+	let ttsLevelRaf: number | null = null;
+	let pushBackSignal = 0;
+	let clickTimeout: ReturnType<typeof setTimeout> | null = null;
+
+	const handleCoreClick = () => {
+		if (clickTimeout) {
+			clearTimeout(clickTimeout);
+			clickTimeout = null;
+		}
+
+		clickTimeout = setTimeout(() => {
+			if (visualState === 'responding') {
+				pushBackSignal += 1;
+				stopAllAudio();
+			}
+			clickTimeout = null;
+		}, 220);
+	};
+
+	const handleCoreDoubleClick = async () => {
+		if (clickTimeout) {
+			clearTimeout(clickTimeout);
+			clickTimeout = null;
+		}
+		await toggleMicMute();
+	};
+
+	$: visualState = loading
+		? 'thinking'
+		: assistantSpeaking
+			? 'responding'
+			: hasStartedSpeaking
+				? 'userSpeaking'
+				: 'idle';
 
 	let videoInputDevices = [];
 	let selectedVideoInputDeviceId = null;
@@ -146,8 +186,33 @@
 		camera = false;
 	};
 
+	const resetEmotion = () => {
+		emotion = 'neutral';
+	};
+
+	const stripEmotionCode = (content: string, messageId: string) => {
+		const match = emotionRegex.exec(content);
+		if (match) {
+			const detected = match[1].toLowerCase() as Emotion;
+			emotion = detected;
+			messageEmotions.set(messageId, detected);
+			return content.replace(emotionRegex, '').trimStart();
+		}
+
+		if (messageEmotions.has(messageId)) {
+			emotion = messageEmotions.get(messageId) as Emotion;
+		}
+
+		return content;
+	};
+
+	const getEmojiFontSize = (large = false) => {
+		const base = large ? 9 : 4;
+		const boost = Math.min(3, rmsLevel * 12);
+		return `${base + boost}rem`;
+	};
+
 	const MIN_DECIBELS = -55;
-	const VISUALIZER_BUFFER_LENGTH = 300;
 
 	const transcribeHandler = async (audioBlob) => {
 		// Create a blob from the audio chunks
@@ -296,6 +361,52 @@
 		setMicEnabled(micMuted); // flips current state
 	};
 
+	const smoothLerp = (from: number, to: number, alpha: number) => from + (to - from) * alpha;
+
+	const ensureTTSAnalyser = async () => {
+		const audioElement = document.getElementById('audioElement') as HTMLAudioElement | null;
+		if (!audioElement) return null;
+
+		if (!ttsAudioContext) {
+			ttsAudioContext = new AudioContext();
+		}
+
+		if (!ttsSource) {
+			ttsSource = ttsAudioContext.createMediaElementSource(audioElement);
+			ttsAnalyser = ttsAudioContext.createAnalyser();
+			ttsAnalyser.fftSize = 2048;
+			ttsAnalyser.smoothingTimeConstant = 0.82;
+			ttsSource.connect(ttsAnalyser);
+			ttsAnalyser.connect(ttsAudioContext.destination);
+			ttsDataArray = new Uint8Array(ttsAnalyser.fftSize);
+		}
+
+		await ttsAudioContext.resume();
+		return ttsAnalyser;
+	};
+
+	const stopTTSMonitoring = () => {
+		ttsPlaying = false;
+		if (ttsLevelRaf) {
+			cancelAnimationFrame(ttsLevelRaf);
+			ttsLevelRaf = null;
+		}
+		ttsLevel = 0;
+	};
+
+	const updateTTSLevel = () => {
+		if (!ttsPlaying || !ttsAnalyser || !ttsDataArray) {
+			ttsLevel = smoothLerp(ttsLevel, 0, 0.18);
+		} else {
+			ttsAnalyser.getByteTimeDomainData(ttsDataArray);
+			const rms = calculateRMS(ttsDataArray);
+			const boosted = Math.max(0, rms - 0.02) * 3; // lift quiet parts
+			ttsLevel = smoothLerp(ttsLevel, Math.min(1.6, boosted), 0.22);
+		}
+
+		ttsLevelRaf = requestAnimationFrame(updateTTSLevel);
+	};
+
 	// Function to calculate the RMS level from time domain data
 	const calculateRMS = (data: Uint8Array) => {
 		let sumSquares = 0;
@@ -411,8 +522,14 @@
 							currentUtterance.voice = voice;
 						}
 
+						assistantSpeaking = true;
+						ttsPlaying = true;
+						loading = false;
 						speechSynthesis.speak(currentUtterance);
 						currentUtterance.onend = async (e) => {
+							assistantSpeaking = false;
+							ttsPlaying = false;
+							stopTTSMonitoring();
 							await new Promise((r) => setTimeout(r, 200));
 							resolve(e);
 						};
@@ -430,9 +547,20 @@
 				const audioElement = document.getElementById('audioElement') as HTMLAudioElement;
 
 				if (audioElement) {
+					ensureTTSAnalyser();
 					audioElement.src = audio.src;
 					audioElement.muted = true;
 					audioElement.playbackRate = $settings.audio?.tts?.playbackRate ?? 1;
+
+					audioElement.onplaying = async () => {
+						assistantSpeaking = true;
+						ttsPlaying = true;
+						loading = false;
+						await ensureTTSAnalyser();
+						if (!ttsLevelRaf) {
+							updateTTSLevel();
+						}
+					};
 
 					audioElement
 						.play()
@@ -444,6 +572,9 @@
 						});
 
 					audioElement.onended = async (e) => {
+						ttsPlaying = false;
+						assistantSpeaking = false;
+						stopTTSMonitoring();
 						await new Promise((r) => setTimeout(r, 100));
 						resolve(e);
 					};
@@ -456,6 +587,7 @@
 
 	const stopAllAudio = async () => {
 		assistantSpeaking = false;
+		stopTTSMonitoring();
 		interrupted = true;
 
 		if (chatStreaming) {
@@ -579,6 +711,8 @@
 			} else if (finishedMessages[id] && messages[id] && messages[id].length === 0) {
 				// If the message is finished and there are no more messages to process, break the loop
 				assistantSpeaking = false;
+				ttsPlaying = false;
+				stopTTSMonitoring();
 				break;
 			} else {
 				// No messages to process, sleep for a bit
@@ -592,9 +726,13 @@
 		const { id } = e.detail;
 
 		chatStreaming = true;
+		loading = true;
 
 		if (currentMessageId !== id) {
 			console.log(`Received chat start event for message ID ${id}`);
+
+			resetEmotion();
+			messageEmotions.delete(id);
 
 			currentMessageId = id;
 			if (audioAbortController) {
@@ -602,7 +740,6 @@
 			}
 			audioAbortController = new AbortController();
 
-			assistantSpeaking = true;
 			// Start monitoring and playing audio for the message ID
 			monitorAndPlayAudio(id, audioAbortController.signal);
 		}
@@ -617,17 +754,21 @@
 
 		if (currentMessageId === id) {
 			console.log(`Received chat event for message ID ${id}: ${content}`);
+			let processedContent = stripEmotionCode(content, id);
+			if (processedContent.trim() === '') {
+				return;
+			}
 
 			try {
 				if (messages[id] === undefined) {
-					messages[id] = [content];
+					messages[id] = [processedContent];
 				} else {
-					messages[id].push(content);
+					messages[id].push(processedContent);
 				}
 
-				console.log(content);
+				console.log(processedContent);
 
-				fetchAudio(content);
+				fetchAudio(processedContent);
 			} catch (error) {
 				console.error('Failed to fetch or play audio:', error);
 			}
@@ -635,8 +776,7 @@
 	};
 
 	const chatFinishHandler = async (e) => {
-		const { id, content } = e.detail;
-		// "content" here is the entire message from the assistant
+		const { id } = e.detail;
 		finishedMessages[id] = true;
 
 		chatStreaming = false;
@@ -671,8 +811,6 @@
 			});
 		}
 
-		model = $models.find((m) => m.id === modelId);
-
 		startRecording();
 
 		eventTarget.addEventListener('chat:start', chatStartHandler);
@@ -692,6 +830,8 @@
 			await tick();
 
 			await stopAllAudio();
+			resetEmotion();
+			messageEmotions.clear();
 
 			await stopRecordingCallback(false);
 			await stopCamera();
@@ -699,9 +839,15 @@
 	});
 
 	onDestroy(async () => {
+		if (clickTimeout) {
+			clearTimeout(clickTimeout);
+			clickTimeout = null;
+		}
 		await stopAllAudio();
 		await stopRecordingCallback(false);
 		await stopCamera();
+		resetEmotion();
+		messageEmotions.clear();
 
 		await stopAudioStream();
 		eventTarget.removeEventListener('chat:start', chatStartHandler);
@@ -716,346 +862,131 @@
 </script>
 
 {#if $showCallOverlay}
-	<div class="w-[360px] max-w-[90vw] h-full max-h-[100dvh] flex flex-col justify-between p-3 md:p-6">
+	<div class="relative w-full max-w-[90vw] h-full max-h-[100dvh] overflow-hidden bg-black text-[#ff3333]">
 		{#if camera}
-			<button
-				type="button"
-				class="flex justify-center items-center w-full h-20 min-h-20"
-				on:click={() => {
-					if (assistantSpeaking) {
-						stopAllAudio();
+			<div class="relative h-full w-full">
+				<!-- svelte-ignore a11y-media-has-caption -->
+				<video
+					id="camera-feed"
+					autoplay
+					class="absolute inset-0 h-full w-full object-cover object-center"
+					playsinline
+				/>
+
+				<canvas id="camera-canvas" style="display:none;" />
+
+				<div class="pointer-events-none absolute bottom-4 right-4 w-24 h-24 md:w-28 md:h-28">
+					<div
+						class="relative w-full h-full opacity-90 pointer-events-auto"
+						on:click={handleCoreClick}
+						on:dblclick|preventDefault={handleCoreDoubleClick}
+					>
+						<HalVisualizer
+							{emotion}
+							state={visualState}
+							{rmsLevel}
+							muted={micMuted}
+							responseLevel={ttsLevel}
+							{pushBackSignal}
+						/>
+
+						{#if emoji}
+							<div
+								class="absolute inset-0 flex items-center justify-center text-white drop-shadow-xl"
+								style={`font-size:${getEmojiFontSize(false)};`}
+							>
+								{emoji}
+							</div>
+						{/if}
+					</div>
+				</div>
+			</div>
+		{:else}
+			<div
+				role="button"
+				tabindex="0"
+				class="relative h-full w-full outline-none select-none"
+				on:click={handleCoreClick}
+				on:dblclick|preventDefault={handleCoreDoubleClick}
+				on:keydown={(event) => {
+					if (event.key === 'Enter' || event.key === ' ') {
+						event.preventDefault();
+						if (visualState === 'responding') {
+							stopAllAudio();
+						}
 					}
 				}}
 			>
+				<HalVisualizer
+					{emotion}
+					state={visualState}
+					{rmsLevel}
+					muted={micMuted}
+					responseLevel={ttsLevel}
+					{pushBackSignal}
+				/>
+
 				{#if emoji}
 					<div
-						class="  transition-all rounded-full"
-						style="font-size:{rmsLevel * 100 > 4
-							? '4.5'
-							: rmsLevel * 100 > 2
-								? '4.25'
-								: rmsLevel * 100 > 1
-									? '3.75'
-									: '3.5'}rem;width: 100%; text-align:center;"
+						class="absolute inset-0 flex items-center justify-center text-white drop-shadow-2xl"
+						style={`font-size:${getEmojiFontSize(true)};`}
 					>
 						{emoji}
 					</div>
-				{:else if loading || assistantSpeaking}
-					<svg
-						class="size-12 text-gray-900 dark:text-gray-400"
-						viewBox="0 0 24 24"
-						fill="currentColor"
-						xmlns="http://www.w3.org/2000/svg"
-						><style>
-							.spinner_qM83 {
-								animation: spinner_8HQG 1.05s infinite;
-							}
-							.spinner_oXPr {
-								animation-delay: 0.1s;
-							}
-							.spinner_ZTLf {
-								animation-delay: 0.2s;
-							}
-							@keyframes spinner_8HQG {
-								0%,
-								57.14% {
-									animation-timing-function: cubic-bezier(0.33, 0.66, 0.66, 1);
-									transform: translate(0);
-								}
-								28.57% {
-									animation-timing-function: cubic-bezier(0.33, 0, 0.66, 0.33);
-									transform: translateY(-6px);
-								}
-								100% {
-									transform: translate(0);
-								}
-							}
-						</style><circle class="spinner_qM83" cx="4" cy="12" r="3" /><circle
-							class="spinner_qM83 spinner_oXPr"
-							cx="12"
-							cy="12"
-							r="3"
-						/><circle class="spinner_qM83 spinner_ZTLf" cx="20" cy="12" r="3" /></svg
-					>
-				{:else}
-					<div
-						class=" {rmsLevel * 100 > 4
-							? ' size-[4.5rem]'
-							: rmsLevel * 100 > 2
-								? ' size-16'
-								: rmsLevel * 100 > 1
-									? 'size-14'
-									: 'size-12'}  transition-all rounded-full bg-cover bg-center bg-no-repeat"
-						style={`background-image: url('${WEBUI_API_BASE_URL}/models/model/profile/image?id=${model?.id}&lang=${$i18n.language}&voice=true');`}
-					/>
 				{/if}
-				<!-- navbar -->
-			</button>
+			</div>
 		{/if}
 
-		<div class="flex justify-center items-center flex-1 h-full w-full max-h-full">
-			{#if !camera}
-				<button
-					type="button"
-					on:click={() => {
-						if (assistantSpeaking) {
-							stopAllAudio();
-						}
-					}}
-				>
-					{#if emoji}
-						<div
-							class="  transition-all rounded-full"
-							style="font-size:{rmsLevel * 100 > 4
-								? '13'
-								: rmsLevel * 100 > 2
-									? '12'
-									: rmsLevel * 100 > 1
-										? '11.5'
-										: '11'}rem;width:100%;text-align:center;"
-						>
-							{emoji}
-						</div>
-					{:else if loading || assistantSpeaking}
-						<svg
-							class="size-44 text-gray-900 dark:text-gray-400"
-							viewBox="0 0 24 24"
-							fill="currentColor"
-							xmlns="http://www.w3.org/2000/svg"
-							><style>
-								.spinner_qM83 {
-									animation: spinner_8HQG 1.05s infinite;
-								}
-								.spinner_oXPr {
-									animation-delay: 0.1s;
-								}
-								.spinner_ZTLf {
-									animation-delay: 0.2s;
-								}
-								@keyframes spinner_8HQG {
-									0%,
-									57.14% {
-										animation-timing-function: cubic-bezier(0.33, 0.66, 0.66, 1);
-										transform: translate(0);
-									}
-									28.57% {
-										animation-timing-function: cubic-bezier(0.33, 0, 0.66, 0.33);
-										transform: translateY(-6px);
-									}
-									100% {
-										transform: translate(0);
-									}
-								}
-							</style><circle class="spinner_qM83" cx="4" cy="12" r="3" /><circle
-								class="spinner_qM83 spinner_oXPr"
-								cx="12"
-								cy="12"
-								r="3"
-							/><circle class="spinner_qM83 spinner_ZTLf" cx="20" cy="12" r="3" /></svg
-						>
-					{:else}
-						<div
-							class=" {rmsLevel * 100 > 4
-								? ' size-52'
-								: rmsLevel * 100 > 2
-									? 'size-48'
-									: rmsLevel * 100 > 1
-										? 'size-44'
-										: 'size-40'} transition-all rounded-full bg-cover bg-center bg-no-repeat"
-							style={`background-image: url('${WEBUI_API_BASE_URL}/models/model/profile/image?id=${model?.id}&lang=${$i18n.language}&voice=true');`}
-						/>
-					{/if}
-				</button>
-			{:else}
-				<div class="relative flex video-container w-full max-h-full pt-2 pb-4 md:py-6 px-2 h-full">
-					<!-- svelte-ignore a11y-media-has-caption -->
-					<video
-						id="camera-feed"
-						autoplay
-						class="rounded-2xl h-full min-w-full object-cover object-center"
-						playsinline
-					/>
-
-					<canvas id="camera-canvas" style="display:none;" />
-
-					<div class=" absolute top-4 md:top-8 left-4">
-						<button
-							type="button"
-							class="p-1.5 text-white cursor-pointer backdrop-blur-xl bg-black/10 rounded-full"
-							on:click={() => {
-								stopCamera();
+		<div class="pointer-events-none absolute inset-x-3 bottom-3 md:inset-x-4 md:bottom-4">
+			<div class="flex items-end justify-between gap-3">
+				<div class="flex gap-2 pointer-events-auto">
+					{#if camera}
+						<VideoInputMenu
+							devices={videoInputDevices}
+							on:change={async (e) => {
+								console.log(e.detail);
+								selectedVideoInputDeviceId = e.detail;
+								await stopVideoStream();
+								await startVideoStream();
 							}}
 						>
-							<svg
-								xmlns="http://www.w3.org/2000/svg"
-								viewBox="0 0 16 16"
-								fill="currentColor"
-								class="size-6"
-							>
-								<path
-									d="M5.28 4.22a.75.75 0 0 0-1.06 1.06L6.94 8l-2.72 2.72a.75.75 0 1 0 1.06 1.06L8 9.06l2.72 2.72a.75.75 0 1 0 1.06-1.06L9.06 8l2.72-2.72a.75.75 0 0 0-1.06-1.06L8 6.94 5.28 4.22Z"
-								/>
-							</svg>
+							<button class={retroButtonClass} type="button" aria-label="Video source">
+								<span class="hidden md:inline">INPUT</span>
+								<span class="md:ml-1">CAM</span>
+							</button>
+						</VideoInputMenu>
+						<button type="button" class={retroButtonClass} on:click={stopCamera} aria-pressed="true">
+							CAM OFF
 						</button>
-					</div>
-				</div>
-			{/if}
-		</div>
-
-		<div class="flex justify-between items-center pb-2 w-full">
-			<div class="flex items-center gap-2">
-				{#if camera}
-					<VideoInputMenu
-						devices={videoInputDevices}
-						on:change={async (e) => {
-							console.log(e.detail);
-							selectedVideoInputDeviceId = e.detail;
-							await stopVideoStream();
-							await startVideoStream();
-						}}
-					>
-						<button class=" p-3 rounded-full bg-gray-50 dark:bg-gray-900" type="button">
-							<svg
-								xmlns="http://www.w3.org/2000/svg"
-								viewBox="0 0 20 20"
-								fill="currentColor"
-								class="size-5"
-							>
-								<path
-									fill-rule="evenodd"
-									d="M15.312 11.424a5.5 5.5 0 0 1-9.201 2.466l-.312-.311h2.433a.75.75 0 0 0 0-1.5H3.989a.75.75 0 0 0-.75.75v4.242a.75.75 0 0 0 1.5 0v-2.43l.31.31a7 7 0 0 0 11.712-3.138.75.75 0 0 0-1.449-.39Zm1.23-3.723a.75.75 0 0 0 .219-.53V2.929a.75.75 0 0 0-1.5 0V5.36l-.31-.31A7 7 0 0 0 3.239 8.188a.75.75 0 1 0 1.448.389A5.5 5.5 0 0 1 13.89 6.11l.311.31h-2.432a.75.75 0 0 0 0 1.5h4.243a.75.75 0 0 0 .53-.219Z"
-									clip-rule="evenodd"
-								/>
-							</svg>
-						</button>
-					</VideoInputMenu>
-				{:else}
-					<Tooltip content={$i18n.t('Camera')}>
+					{:else}
 						<button
-							class=" p-3 rounded-full bg-gray-50 dark:bg-gray-900"
 							type="button"
+							class={retroButtonClass}
 							on:click={async () => {
 								await navigator.mediaDevices.getUserMedia({ video: true });
 								startCamera();
 							}}
 						>
-							<svg
-								xmlns="http://www.w3.org/2000/svg"
-								fill="none"
-								viewBox="0 0 24 24"
-								stroke-width="1.5"
-								stroke="currentColor"
-								class="size-5"
-							>
-								<path
-									stroke-linecap="round"
-									stroke-linejoin="round"
-									d="M6.827 6.175A2.31 2.31 0 0 1 5.186 7.23c-.38.054-.757.112-1.134.175C2.999 7.58 2.25 8.507 2.25 9.574V18a2.25 2.25 0 0 0 2.25 2.25h15A2.25 2.25 0 0 0 21.75 18V9.574c0-1.067-.75-1.994-1.802-2.169a47.865 47.865 0 0 0-1.134-.175 2.31 2.31 0 0 1-1.64-1.055l-.822-1.316a2.192 2.192 0 0 0-1.736-1.039 48.774 48.774 0 0 0-5.232 0 2.192 2.192 0 0 0-1.736 1.039l-.821 1.316Z"
-								/>
-								<path
-									stroke-linecap="round"
-									stroke-linejoin="round"
-									d="M16.5 12.75a4.5 4.5 0 1 1-9 0 4.5 4.5 0 0 1 9 0ZM18.75 10.5h.008v.008h-.008V10.5Z"
-								/>
-							</svg>
+							CAM/SHARE
 						</button>
-					</Tooltip>
-				{/if}
+					{/if}
+				</div>
 
-				<Tooltip content={micMuted ? $i18n.t('Unmute mic') : $i18n.t('Mute mic')}>
+				<div class="flex gap-2 pointer-events-auto">
 					<button
-						class="p-3 rounded-full bg-gray-50 dark:bg-gray-900"
+						class={retroButtonClass}
+						on:click={async () => {
+							await stopAudioStream();
+							await stopCamera();
+
+							showCallOverlay.set(false);
+							dispatch('close');
+						}}
 						type="button"
-						aria-pressed={micMuted}
-						on:click={toggleMicMute}
 					>
-						{#if micMuted}
-							<svg
-								xmlns="http://www.w3.org/2000/svg"
-								fill="none"
-								viewBox="0 0 24 24"
-								stroke-width="1.5"
-								stroke="currentColor"
-								class="size-5"
-							>
-								<path
-									stroke-linecap="round"
-									stroke-linejoin="round"
-									d="M19.5 12a7.5 7.5 0 0 1-7.5 7.5m0 0V21m0-1.5H9m3 0h3M4.5 12c0 1.493.44 2.884 1.2 4.05m0 0L3 18.75m2.7-2.7L8.25 15M12 4.5v6m0 0a2.25 2.25 0 0 0 4.5 0V9m-4.5 1.5a2.25 2.25 0 0 1-3.63 1.74M8.37 12.24 5.25 9.75m7.5-5.25L9 6.75"
-								/>
-							</svg>
-						{:else}
-							<svg
-								xmlns="http://www.w3.org/2000/svg"
-								fill="none"
-								viewBox="0 0 24 24"
-								stroke-width="1.5"
-								stroke="currentColor"
-								class="size-5"
-							>
-								<path
-									stroke-linecap="round"
-									stroke-linejoin="round"
-									d="M12 4.5a3 3 0 0 0-3 3V12a3 3 0 1 0 6 0V7.5a3 3 0 0 0-3-3Z"
-								/>
-								<path
-									stroke-linecap="round"
-									stroke-linejoin="round"
-									d="M19.5 12a7.5 7.5 0 0 1-15 0M12 18.75V21m0-2.25h3m-3 0H9"
-								/>
-							</svg>
-						{/if}
+						END
 					</button>
-				</Tooltip>
-			</div>
-
-			<div>
-				<button
-					type="button"
-					on:click={() => {
-						if (assistantSpeaking) {
-							stopAllAudio();
-						}
-					}}
-				>
-					<div class=" line-clamp-1 text-sm font-medium">
-						{#if loading}
-							{$i18n.t('Thinking...')}
-						{:else if assistantSpeaking}
-							{$i18n.t('Tap to interrupt')}
-						{:else}
-							{$i18n.t('Listening...')}
-						{/if}
-					</div>
-				</button>
-			</div>
-
-			<div>
-				<button
-					class=" p-3 rounded-full bg-gray-50 dark:bg-gray-900"
-					on:click={async () => {
-						await stopAudioStream();
-						await stopVideoStream();
-
-						console.log(audioStream);
-						console.log(cameraStream);
-
-						showCallOverlay.set(false);
-						dispatch('close');
-					}}
-					type="button"
-				>
-					<svg
-						xmlns="http://www.w3.org/2000/svg"
-						viewBox="0 0 20 20"
-						fill="currentColor"
-						class="size-5"
-					>
-						<path
-							d="M6.28 5.22a.75.75 0 0 0-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 1 0 1.06 1.06L10 11.06l3.72 3.72a.75.75 0 1 0 1.06-1.06L11.06 10l3.72-3.72a.75.75 0 0 0-1.06-1.06L10 8.94 6.28 5.22Z"
-						/>
-					</svg>
-				</button>
+				</div>
 			</div>
 		</div>
 	</div>

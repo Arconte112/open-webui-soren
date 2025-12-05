@@ -148,15 +148,19 @@
 	class=" z-10 bg-white dark:bg-gray-850"
 >
 	{#if $showControls}
-		<div class="flex max-h-full min-h-full">
+		<div class="flex max-h-full min-h-full h-full">
 			<div
-				class="w-full {($showOverview || $showArtifacts || $showEmbeds) && !$showCallOverlay
+				class="w-full min-h-full h-full {($showOverview || $showArtifacts || $showEmbeds) && !$showCallOverlay
 					? ' '
-					: 'px-4 py-3 bg-white dark:shadow-lg dark:bg-gray-850 '} z-40 pointer-events-auto overflow-y-auto scrollbar-hidden"
+					: $showCallOverlay
+						? 'bg-black'
+						: 'px-4 py-3 bg-white dark:shadow-lg dark:bg-gray-850 '} z-40 pointer-events-auto { $showCallOverlay
+					? 'overflow-hidden'
+					: 'overflow-y-auto scrollbar-hidden'}"
 				id="controls-container"
 			>
 				{#if $showCallOverlay}
-					<div class="w-full h-full flex justify-center">
+					<div class="w-full h-full flex justify-center items-stretch">
 						<CallOverlay
 							bind:files
 							{submitPrompt}
