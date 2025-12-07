@@ -1,0 +1,177 @@
+"""
+title: search_conversations
+author: Soren Team
+version: 0.1.0
+description: Busca conversaciones vectorizadas en Postgres (pgvector) usando embeddings de OpenRouter (text-embedding-3-small).
+"""
+
+import logging
+import os
+from datetime import datetime
+from typing import Any
+
+import httpx
+from sqlalchemy import text
+
+from open_webui.chat_summaries.repository import list_active_settings
+from open_webui.utils.task import get_memories_engine
+
+LOG = logging.getLogger("tool.search_conversations")
+
+OPENROUTER_EMBED_URL = os.getenv(
+    "OPENROUTER_EMBEDDINGS_URL", "https://openrouter.ai/api/v1/embeddings"
+)
+OPENROUTER_REFERRER = os.getenv(
+    "OPENROUTER_REFERRER", "https://soren-openwebui.local"
+)
+OPENROUTER_TITLE = os.getenv("OPENROUTER_TITLE", "soren-openwebui search tool")
+EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "openai/text-embedding-3-small")
+
+DEFAULT_LIMIT = 5
+MAX_LIMIT = 50
+DEFAULT_MIN_SIM = 0.7
+
+HARDCODED_API_KEY = "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"
+
+
+def _resolve_api_key(engine) -> str:
+    # Prioridad: hardcode -> env -> chat_summary_settings
+    if HARDCODED_API_KEY:
+        return HARDCODED_API_KEY
+    env_key = os.getenv("OPENROUTER_API_KEY")
+    if env_key:
+        return env_key
+
+    settings = list_active_settings(engine)
+    for setting in settings:
+        if setting.api_key:
+            return setting.api_key
+
+    raise RuntimeError(
+        "No se encontró API key: define OPENROUTER_API_KEY o configura resúmenes de chat."
+    )
+
+
+def _embedding_literal(vec: list[float]) -> str:
+    return "[" + ",".join(f"{x:.8f}" for x in vec) + "]"
+
+
+def _embed_query(query: str, api_key: str) -> list[float]:
+    payload = {"model": EMBEDDING_MODEL, "input": query}
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+        "HTTP-Referer": OPENROUTER_REFERRER,
+        "X-Title": OPENROUTER_TITLE,
+    }
+
+    with httpx.Client(timeout=30) as client:
+        resp = client.post(OPENROUTER_EMBED_URL, json=payload, headers=headers)
+        resp.raise_for_status()
+        data = resp.json()
+        items = data.get("data", [])
+        if not items:
+            raise RuntimeError("OpenRouter no devolvió embeddings para la query.")
+        emb = items[0].get("embedding")
+        if not emb:
+            raise RuntimeError("Respuesta de OpenRouter sin campo embedding.")
+        return emb
+
+
+def _fmt_ts(ts: Any) -> str:
+    if ts is None:
+        return "sin fecha"
+    if isinstance(ts, datetime):
+        return ts.isoformat()
+    return str(ts)
+
+
+def _trim(text: str, max_len: int = 320) -> str:
+    if text is None:
+        return ""
+    return text if len(text) <= max_len else text[: max_len - 3] + "..."
+
+
+class Tools:
+    def __init__(self):
+        """Toolkit para buscar conversaciones vectorizadas."""
+        pass
+
+    def search_conversations(
+        self, query: str, limit: int = DEFAULT_LIMIT, min_similarity: float = DEFAULT_MIN_SIM
+    ) -> str:
+        """
+        Busca fragmentos relevantes en conversaciones vectorizadas usando similitud coseno.
+
+        :param query: Texto de búsqueda en lenguaje natural.
+        :param limit: Máximo de resultados (default 5, tope 50).
+        :param min_similarity: Umbral mínimo de similitud coseno (0-1, default 0.7).
+        :return: Texto plano con fecha, usuario, asistente y score de similitud.
+        """
+        q = (query or "").strip()
+        if not q:
+            return "query vacío: proporciona texto a buscar."
+
+        if limit <= 0:
+            limit = DEFAULT_LIMIT
+        limit = min(limit, MAX_LIMIT)
+
+        try:
+            min_similarity = float(min_similarity)
+        except Exception:
+            min_similarity = DEFAULT_MIN_SIM
+        min_similarity = max(0.0, min(min_similarity, 1.0))
+
+        engine = get_memories_engine()
+        if engine is None:
+            return "Base externa de memorias no configurada; no puedo buscar embeddings."
+
+        try:
+            api_key = _resolve_api_key(engine)
+            query_emb = _embedding_literal(_embed_query(q, api_key))
+        except Exception as exc:  # pragma: no cover
+            LOG.error("Fallo obteniendo embedding: %s", exc)
+            return f"No pude generar el embedding de la query: {exc}"
+
+        sql = text(
+            """
+            WITH q AS (SELECT CAST(:query_emb AS vector) AS emb)
+            SELECT
+                chat_id,
+                user_content,
+                assistant_content,
+                message_timestamp,
+                1 - (embedding <=> q.emb) AS similarity
+            FROM chat_embeddings, q
+            WHERE 1 - (embedding <=> q.emb) >= :min_similarity
+            ORDER BY similarity DESC
+            LIMIT :limit
+            """
+        )
+
+        try:
+            with engine.connect() as conn:
+                rows = conn.execute(
+                    sql,
+                    {
+                        "query_emb": query_emb,
+                        "min_similarity": min_similarity,
+                        "limit": limit,
+                    },
+                ).mappings().all()
+        except Exception as exc:  # pragma: no cover
+            LOG.error("Fallo consultando pgvector: %s", exc)
+            return f"Error consultando pgvector: {exc}"
+
+        if not rows:
+            return f"Sin coincidencias con similitud >= {min_similarity:.2f}."
+
+        lines = [f"Resultados (top {len(rows)}, umbral {min_similarity:.2f}):"]
+        for idx, row in enumerate(rows, 1):
+            lines.append(
+                f"{idx}. fecha={_fmt_ts(row.get('message_timestamp'))} | score={row['similarity']:.3f}\n"
+                f"   usuario: {_trim(row.get('user_content', ''))}\n"
+                f"   asistente: {_trim(row.get('assistant_content', ''))}"
+            )
+
+        return "\n".join(lines)
