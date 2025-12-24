@@ -1,17 +1,21 @@
 <script lang="ts">
-	import { config, settings, showCallOverlay, TTSWorker } from '$lib/stores';
-	import { onMount, tick, onDestroy, createEventDispatcher } from 'svelte';
+import { config, mobile, settings, showCallOverlay, TTSWorker } from '$lib/stores';
+import { onMount, tick, onDestroy, createEventDispatcher } from 'svelte';
 
-	const dispatch = createEventDispatcher();
+const dispatch = createEventDispatcher();
 
-	import { blobToFile } from '$lib/utils';
-	import { generateEmoji } from '$lib/apis';
-	import { synthesizeOpenAISpeech, transcribeAudio } from '$lib/apis/audio';
+import { blobToFile } from '$lib/utils';
+import { generateEmoji } from '$lib/apis';
+import { synthesizeOpenAISpeech, transcribeAudio } from '$lib/apis/audio';
 
-	import { toast } from 'svelte-sonner';
-	import VideoInputMenu from './CallOverlay/VideoInputMenu.svelte';
-	import { KokoroWorker } from '$lib/workers/KokoroWorker';
-	import HalVisualizer, { type Emotion, type VisualState } from './CallOverlay/HalVisualizer.svelte';
+import { toast } from 'svelte-sonner';
+import VideoInputMenu from './CallOverlay/VideoInputMenu.svelte';
+import { KokoroWorker } from '$lib/workers/KokoroWorker';
+import HalVisualizer, { type Emotion, type VisualState } from './CallOverlay/HalVisualizer.svelte';
+import { MicVAD, utils as vadUtils } from '@ricky0123/vad-web';
+
+const onnxRuntimeVersion = ONNXRUNTIME_WEB_VERSION;
+const ONNX_WASM_BASE = `https://cdn.jsdelivr.net/npm/onnxruntime-web@${onnxRuntimeVersion}/dist/`;
 
 	export let eventTarget: EventTarget;
 	export let submitPrompt: Function;
@@ -19,6 +23,7 @@
 	export let files;
 	export let chatId;
 	export let modelId;
+	export let fullscreen = false;
 
 	let wakeLock = null;
 
@@ -54,6 +59,11 @@
 	let pushBackSignal = 0;
 	let clickTimeout: ReturnType<typeof setTimeout> | null = null;
 
+	// VAD (Voice Activity Detection) state
+	let vadInstance: MicVAD | null = null;
+	let vadReady = false;
+	let useVADFallback = false; // If true, use legacy threshold-based detection
+
 	const handleCoreClick = () => {
 		if (clickTimeout) {
 			clearTimeout(clickTimeout);
@@ -77,7 +87,9 @@
 		await toggleMicMute();
 	};
 
-	$: visualState = loading
+	// visualState should be 'thinking' from when user finishes speaking until TTS starts playing
+	// 'responding' only when TTS is actually playing audio
+	$: visualState = (loading || (chatStreaming && !assistantSpeaking))
 		? 'thinking'
 		: assistantSpeaking
 			? 'responding'
@@ -212,7 +224,26 @@
 		return `${base + boost}rem`;
 	};
 
+	// Legacy threshold for fallback detection (only used if VAD fails to load)
 	const MIN_DECIBELS = -55;
+
+	// Reactive muting: when chatStreaming or assistantSpeaking, mute the mic track (not just analysis)
+	$: {
+		if (audioStream && !($settings?.voiceInterruption ?? false)) {
+			const shouldMute = chatStreaming || assistantSpeaking;
+			audioStream.getAudioTracks().forEach((track) => {
+				track.enabled = !shouldMute;
+			});
+			// Also pause/resume VAD if available
+			if (vadInstance && vadReady) {
+				if (shouldMute) {
+					vadInstance.pause();
+				} else {
+					vadInstance.start();
+				}
+			}
+		}
+	}
 
 	const transcribeHandler = async (audioBlob) => {
 		// Create a blob from the audio chunks
@@ -243,40 +274,32 @@
 		if ($showCallOverlay) {
 			console.log('%c%s', 'color: red; font-size: 20px;', '🚨 stopRecordingCallback 🚨');
 
-			// deep copy the audioChunks array
-			const _audioChunks = audioChunks.slice(0);
+			// For VAD mode, audioChunks are handled in onSpeechEnd callback
+			// This function is mainly for cleanup when overlay closes
 
 			audioChunks = [];
 			mediaRecorder = false;
 
-			if (_continue) {
-				startRecording();
-			}
-
-			if (confirmed) {
-				loading = true;
-				emoji = null;
-
-				if (cameraStream) {
-					const imageUrl = takeScreenshot();
-
-					files = [
-						{
-							type: 'image',
-							url: imageUrl
-						}
-					];
+			if (!_continue) {
+				// Cleanup VAD
+				if (vadInstance) {
+					vadInstance.pause();
+					vadInstance.destroy();
+					vadInstance = null;
+					vadReady = false;
 				}
-
-				const audioBlob = new Blob(_audioChunks, { type: 'audio/wav' });
-				await transcribeHandler(audioBlob);
-
-				confirmed = false;
-				loading = false;
 			}
 		} else {
 			audioChunks = [];
 			mediaRecorder = false;
+
+			// Cleanup VAD
+			if (vadInstance) {
+				vadInstance.pause();
+				vadInstance.destroy();
+				vadInstance = null;
+				vadReady = false;
+			}
 
 			if (audioStream) {
 				const tracks = audioStream.getTracks();
@@ -287,7 +310,93 @@
 		}
 	};
 
-	const startRecording = async () => {
+	// Initialize VAD with Silero model
+	const initVAD = async () => {
+		try {
+			console.log('🎤 Initializing VAD with Silero model...');
+
+			vadInstance = await MicVAD.new({
+				// Use v5 model explicitly (default is "legacy" which looks for silero_vad_legacy.onnx)
+				model: 'v5',
+				// Use CDN for ONNX WASM runtime (pinned to the installed onnxruntime-web version to avoid 404s)
+				onnxWASMBasePath: ONNX_WASM_BASE,
+				// Use CDN for VAD model and worklet files (must match installed version 0.0.30)
+				baseAssetPath: 'https://cdn.jsdelivr.net/npm/@ricky0123/vad-web@0.0.30/dist/',
+
+				// Speech detection callbacks
+				onSpeechStart: () => {
+					if (!$showCallOverlay) return;
+					// Don't process if we're in responding/thinking state (unless voice interruption enabled)
+					if ((chatStreaming || assistantSpeaking) && !($settings?.voiceInterruption ?? false)) {
+						return;
+					}
+
+					console.log('%c%s', 'color: green; font-size: 20px;', '🎤 VAD: Speech started');
+					hasStartedSpeaking = true;
+					stopAllAudio(); // Interrupt any playing TTS
+				},
+
+				onSpeechEnd: async (audio: Float32Array) => {
+					if (!$showCallOverlay) return;
+					// Don't process if we're in responding/thinking state
+					if ((chatStreaming || assistantSpeaking) && !($settings?.voiceInterruption ?? false)) {
+						hasStartedSpeaking = false;
+						return;
+					}
+
+					console.log('%c%s', 'color: blue; font-size: 20px;', '🎤 VAD: Speech ended');
+
+					// Convert Float32Array to WAV blob
+					const wavBuffer = vadUtils.encodeWAV(audio);
+					const audioBlob = new Blob([wavBuffer], { type: 'audio/wav' });
+
+					loading = true;
+					emoji = null;
+
+					// Take screenshot if camera is active
+					if (cameraStream) {
+						const imageUrl = takeScreenshot();
+						files = [{ type: 'image', url: imageUrl }];
+					}
+
+					// Send to transcription
+					await transcribeHandler(audioBlob);
+
+					hasStartedSpeaking = false;
+					loading = false;
+				},
+
+				// Real-time audio frame callback for visualization
+				onFrameProcessed: (probs: { isSpeech: number; notSpeech: number }) => {
+					// Use speech probability for RMS visualization
+					rmsLevel = probs.isSpeech * 0.5;
+				},
+
+				// VAD parameters
+				positiveSpeechThreshold: 0.5,
+				negativeSpeechThreshold: 0.35,
+				redemptionFrames: 8,
+				minSpeechFrames: 3,
+				preSpeechPadFrames: 1,
+			});
+
+			vadReady = true;
+			console.log('%c%s', 'color: green; font-size: 24px;', '✅ VAD initialized successfully with Silero model');
+
+			// Start VAD
+			vadInstance.start();
+
+		} catch (error) {
+			console.warn('⚠️ VAD initialization failed, using fallback detection:', error);
+			useVADFallback = true;
+			vadReady = false;
+			// Fall back to legacy detection
+			startLegacyRecording();
+		}
+	};
+
+	// Legacy recording with threshold-based detection (fallback)
+	const startLegacyRecording = async () => {
 		if ($showCallOverlay) {
 			if (!audioStream) {
 				audioStream = await navigator.mediaDevices.getUserMedia({
@@ -301,7 +410,7 @@
 			mediaRecorder = new MediaRecorder(audioStream);
 
 			mediaRecorder.onstart = () => {
-				console.log('Recording started');
+				console.log('Recording started (legacy mode)');
 				audioChunks = [];
 			};
 
@@ -311,16 +420,61 @@
 				}
 			};
 
-			mediaRecorder.onstop = (e) => {
-				console.log('Recording stopped', audioStream, e);
-				stopRecordingCallback();
+			mediaRecorder.onstop = async (e) => {
+				console.log('Recording stopped (legacy mode)', audioStream, e);
+
+				if ($showCallOverlay && confirmed) {
+					const _audioChunks = audioChunks.slice(0);
+					audioChunks = [];
+
+					loading = true;
+					emoji = null;
+
+					if (cameraStream) {
+						const imageUrl = takeScreenshot();
+						files = [{ type: 'image', url: imageUrl }];
+					}
+
+					const audioBlob = new Blob(_audioChunks, { type: 'audio/wav' });
+					await transcribeHandler(audioBlob);
+
+					confirmed = false;
+					loading = false;
+					hasStartedSpeaking = false;
+
+					// Continue recording
+					startLegacyRecording();
+				}
 			};
 
 			analyseAudio(audioStream);
 		}
 	};
 
+	const startRecording = async () => {
+		if ($showCallOverlay) {
+			// Try to initialize VAD, fall back to legacy if it fails
+			if (!useVADFallback && !vadInstance) {
+				await initVAD();
+			} else if (useVADFallback) {
+				await startLegacyRecording();
+			}
+		}
+	};
+
 	const stopAudioStream = async () => {
+		// Stop VAD first
+		if (vadInstance) {
+			try {
+				vadInstance.pause();
+				vadInstance.destroy();
+			} catch (e) {
+				console.log('Error destroying VAD:', e);
+			}
+			vadInstance = null;
+			vadReady = false;
+		}
+
 		try {
 			if (mediaRecorder) {
 				mediaRecorder.stop();
@@ -363,6 +517,9 @@
 
 	const smoothLerp = (from: number, to: number, alpha: number) => from + (to - from) * alpha;
 
+	// Track which audio element has been connected to avoid duplicate connections
+	let connectedAudioElement: HTMLAudioElement | null = null;
+
 	const ensureTTSAnalyser = async () => {
 		const audioElement = document.getElementById('audioElement') as HTMLAudioElement | null;
 		if (!audioElement) return null;
@@ -371,14 +528,30 @@
 			ttsAudioContext = new AudioContext();
 		}
 
-		if (!ttsSource) {
-			ttsSource = ttsAudioContext.createMediaElementSource(audioElement);
-			ttsAnalyser = ttsAudioContext.createAnalyser();
-			ttsAnalyser.fftSize = 2048;
-			ttsAnalyser.smoothingTimeConstant = 0.82;
-			ttsSource.connect(ttsAnalyser);
-			ttsAnalyser.connect(ttsAudioContext.destination);
-			ttsDataArray = new Uint8Array(ttsAnalyser.fftSize);
+		// Only create MediaElementSource if this element hasn't been connected before
+		// or if it's a different element
+		if (!ttsSource || connectedAudioElement !== audioElement) {
+			// If we had a previous source connected to a different element, we can't reuse it
+			// But we also can't reconnect the same element - check if it's the same one
+			if (connectedAudioElement === audioElement && ttsSource) {
+				// Same element already connected, just resume context
+				await ttsAudioContext.resume();
+				return ttsAnalyser;
+			}
+
+			try {
+				ttsSource = ttsAudioContext.createMediaElementSource(audioElement);
+				connectedAudioElement = audioElement;
+				ttsAnalyser = ttsAudioContext.createAnalyser();
+				ttsAnalyser.fftSize = 2048;
+				ttsAnalyser.smoothingTimeConstant = 0.82;
+				ttsSource.connect(ttsAnalyser);
+				ttsAnalyser.connect(ttsAudioContext.destination);
+				ttsDataArray = new Uint8Array(ttsAnalyser.fftSize);
+			} catch (e) {
+				// Element may already be connected from a previous session
+				console.warn('AudioElement already connected, reusing existing analyser');
+			}
 		}
 
 		await ttsAudioContext.resume();
@@ -417,7 +590,13 @@
 		return Math.sqrt(sumSquares / data.length);
 	};
 
+	// Legacy audio analysis - only used as fallback when VAD fails to load
 	const analyseAudio = (stream) => {
+		if (!useVADFallback) {
+			console.log('analyseAudio called but VAD is active, skipping legacy detection');
+			return;
+		}
+
 		const audioContext = new AudioContext();
 		const audioStreamSource = audioContext.createMediaStreamSource(stream);
 
@@ -433,7 +612,7 @@
 		let lastSoundTime = Date.now();
 		hasStartedSpeaking = false;
 
-		console.log('🔊 Sound detection started', lastSoundTime, hasStartedSpeaking);
+		console.log('🔊 Sound detection started (LEGACY FALLBACK MODE)', lastSoundTime, hasStartedSpeaking);
 
 		const detectSound = () => {
 			const processFrame = () => {
@@ -441,8 +620,10 @@
 					return;
 				}
 
-				if (assistantSpeaking && !($settings?.voiceInterruption ?? false)) {
-					// Mute the audio if the assistant is speaking
+				// Ignore microphone input during text generation (chatStreaming) and TTS playback (assistantSpeaking)
+				// unless voice interruption is explicitly enabled
+				if ((chatStreaming || assistantSpeaking) && !($settings?.voiceInterruption ?? false)) {
+					// Mute the audio analysis during response generation and TTS playback
 					analyser.maxDecibels = 0;
 					analyser.minDecibels = -1;
 				} else {
@@ -460,7 +641,7 @@
 				const hasSound = domainData.some((value) => value > 0);
 				if (hasSound) {
 					// BIG RED TEXT
-					console.log('%c%s', 'color: red; font-size: 20px;', '🔊 Sound detected');
+					console.log('%c%s', 'color: red; font-size: 20px;', '🔊 Sound detected (legacy)');
 					if (mediaRecorder && mediaRecorder.state !== 'recording') {
 						mediaRecorder.start();
 					}
@@ -479,7 +660,7 @@
 						confirmed = true;
 
 						if (mediaRecorder) {
-							console.log('%c%s', 'color: red; font-size: 20px;', '🔇 Silence detected');
+							console.log('%c%s', 'color: red; font-size: 20px;', '🔇 Silence detected (legacy)');
 							mediaRecorder.stop();
 							return;
 						}
@@ -843,6 +1024,19 @@
 			clearTimeout(clickTimeout);
 			clickTimeout = null;
 		}
+
+		// Clean up VAD instance
+		if (vadInstance) {
+			try {
+				vadInstance.pause();
+				vadInstance.destroy();
+			} catch (e) {
+				console.log('Error destroying VAD on destroy:', e);
+			}
+			vadInstance = null;
+			vadReady = false;
+		}
+
 		await stopAllAudio();
 		await stopRecordingCallback(false);
 		await stopCamera();
@@ -862,7 +1056,11 @@
 </script>
 
 {#if $showCallOverlay}
-	<div class="relative w-full max-w-[90vw] h-full max-h-[100dvh] overflow-hidden bg-black text-[#ff3333]">
+	<div
+		class={`${fullscreen
+			? 'fixed inset-0 w-screen h-[100dvh] max-w-none max-h-none z-50'
+			: 'relative w-full max-w-[90vw] h-full max-h-[100dvh]'} overflow-hidden bg-black text-[#ff3333]`}
+	>
 		{#if camera}
 			<div class="relative h-full w-full">
 				<!-- svelte-ignore a11y-media-has-caption -->
@@ -888,6 +1086,7 @@
 							muted={micMuted}
 							responseLevel={ttsLevel}
 							{pushBackSignal}
+							isMobile={$mobile}
 						/>
 
 						{#if emoji}
@@ -924,6 +1123,7 @@
 					muted={micMuted}
 					responseLevel={ttsLevel}
 					{pushBackSignal}
+					isMobile={$mobile}
 				/>
 
 				{#if emoji}

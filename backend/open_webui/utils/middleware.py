@@ -1,5 +1,4 @@
 import time
-from datetime import datetime
 import logging
 import sys
 import os
@@ -15,7 +14,6 @@ import html
 import inspect
 import re
 import ast
-from zoneinfo import ZoneInfo
 
 from uuid import uuid4
 from concurrent.futures import ThreadPoolExecutor
@@ -141,87 +139,6 @@ DEFAULT_REASONING_TAGS = [
 ]
 DEFAULT_SOLUTION_TAGS = [("<|begin_of_solution|>", "<|end_of_solution|>")]
 DEFAULT_CODE_INTERPRETER_TAGS = [("<code_interpreter>", "</code_interpreter>")]
-
-TIMELINE_TIMEZONE = ZoneInfo("America/Santo_Domingo")
-TIMELINE_DATE_FORMAT = "%d/%m/%y"
-
-
-def format_timeline_timestamp(raw_timestamp):
-    now = datetime.now(TIMELINE_TIMEZONE)
-    if raw_timestamp is None:
-        return f"{now.strftime(TIMELINE_DATE_FORMAT)} {now.hour}:{now.strftime('%M')}"
-
-    try:
-        ts_float = float(raw_timestamp)
-
-        # Heuristics: timestamps above 1e11 are likely milliseconds
-        if ts_float > 1e11:
-            ts_float = ts_float / 1000.0
-
-        dt = datetime.fromtimestamp(ts_float, tz=TIMELINE_TIMEZONE)
-    except Exception:
-        dt = now
-
-    return f"{dt.strftime(TIMELINE_DATE_FORMAT)} {dt.hour}:{dt.strftime('%M')}"
-
-
-def add_hidden_timestamps(messages):
-    """
-    Prefix user/assistant messages with a localized timestamp for model context only.
-    The timestamp is removed from the payload to avoid leaking it back to the client.
-    """
-    if not isinstance(messages, list):
-        return messages
-
-    annotated_messages = []
-
-    for message in messages:
-        if not isinstance(message, dict):
-            annotated_messages.append(message)
-            continue
-
-        role = message.get("role")
-        message_copy = {**message}
-        message_copy.pop("timestamp", None)
-
-        if role not in ("user", "assistant") or (
-            role == "assistant"
-            and (message_copy.get("tool_calls") or message_copy.get("function_call"))
-        ):
-            annotated_messages.append(message_copy)
-            continue
-
-        prefix = f"[{format_timeline_timestamp(message.get('timestamp'))}] "
-        content = message_copy.get("content")
-
-        if isinstance(content, str):
-            message_copy["content"] = f"{prefix}{content}"
-        elif isinstance(content, list):
-            new_content = []
-            injected = False
-
-            for item in content:
-                if (
-                    not injected
-                    and isinstance(item, dict)
-                    and item.get("type") == "text"
-                    and isinstance(item.get("text"), str)
-                ):
-                    new_content.append({**item, "text": f"{prefix}{item['text']}"})
-                    injected = True
-                else:
-                    new_content.append(item)
-
-            if not injected:
-                new_content.insert(0, {"type": "text", "text": prefix})
-
-            message_copy["content"] = new_content
-        else:
-            message_copy["content"] = prefix.strip() if content is None else content
-
-        annotated_messages.append(message_copy)
-
-    return annotated_messages
 
 
 def process_tool_result(
@@ -1657,8 +1574,6 @@ async def process_chat_payload(request, form_data, user, metadata, model):
                 },
             }
         )
-
-    form_data["messages"] = add_hidden_timestamps(form_data.get("messages", []))
 
     return form_data, metadata, events
 

@@ -41,6 +41,7 @@ from open_webui.scheduled_tasks.repository import (  # noqa: E402
     update_last_error,
     update_last_response_preview,
     reschedule_task,
+    STATUS_PENDING,
     STATUS_RUNNING,
     STATUS_DONE,
     STATUS_FAILED,
@@ -123,6 +124,7 @@ def run_once(base_url: str, token: str) -> None:
     if not tasks:
         return
 
+    print(f"[scheduled_tasks] {len(tasks)} tareas due a {now.isoformat()}")
     for task in tasks:
         task_id = task.id
         print(f"[scheduled_tasks] Ejecutando tarea {task_id} (run_at={task.run_at.isoformat()}, notify={task.notify})")
@@ -165,7 +167,7 @@ def run_once(base_url: str, token: str) -> None:
                         task_id=task_id,
                         next_run_at=next_run,
                         status=STATUS_PENDING,
-                        executed_at=None,
+                        executed_at=now_exec,
                     )
                     print(
                         f"[scheduled_tasks] Tarea {task_id} finalizada y reprogramada a {next_run.isoformat()} (recurrence={task.recurrence})"
@@ -173,7 +175,10 @@ def run_once(base_url: str, token: str) -> None:
                 else:
                     update_task_status(task_id, STATUS_COMPLETED, executed_at=now_exec)
                     print(
-                        f"[scheduled_tasks] Tarea {task_id} finalizada y marcada completed (recurrence end reached)"
+                        "[scheduled_tasks] Tarea "
+                        f"{task_id} finalizada y marcada completed (next_run="
+                        f"{next_run.isoformat() if next_run else 'None'}, "
+                        f"recurrence_end={task.recurrence_end.isoformat() if task.recurrence_end else 'None'})"
                     )
             else:
                 update_task_status(task_id, STATUS_DONE, executed_at=now_exec)

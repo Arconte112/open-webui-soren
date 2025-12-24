@@ -13,7 +13,11 @@ from open_webui.env import SRC_LOG_LEVELS, AIOHTTP_CLIENT_SESSION_SSL
 from open_webui.models.chats import ChatForm, Chats
 from open_webui.models.models import Models
 from open_webui.models.tools import Tools
+from open_webui.models.groups import Groups
 from open_webui.utils.auth import get_verified_user
+from open_webui.utils.access_control import has_access
+from open_webui.utils.tools import get_tool_servers
+from open_webui.config import BYPASS_ADMIN_ACCESS_CONTROL
 
 
 log = logging.getLogger(__name__)
@@ -100,6 +104,70 @@ def extract_tool_ids(model_meta: Optional[dict], model_params: Optional[dict]) -
     return list(dict.fromkeys(candidates))
 
 
+async def _get_accessible_tool_ids(request: Request, user) -> list[str]:
+    """
+    Build the default toolIds list for scheduled tasks:
+    - local workspace tools readable by the user
+    - enabled OpenAPI tool servers (server:<id>)
+    - MCP tool servers (server:mcp:<id>)
+    with the same access-control filtering as /api/v1/tools.
+    """
+    local_ids = [tool.id for tool in Tools.get_tools_by_user_id(user.id, "read")]
+
+    tool_server_ids: list[str] = []
+    mcp_server_ids: list[str] = []
+
+    # OpenAPI servers (already filtered by config.enable inside get_tool_servers_data)
+    try:
+        openapi_servers = await get_tool_servers(request)
+    except Exception as exc:  # pylint: disable=broad-except
+        log.error("Failed to fetch OpenAPI tool servers: %s", exc)
+        openapi_servers = []
+
+    openapi_access: list[tuple[str, Optional[dict]]] = []
+    for server in openapi_servers:
+        server_id = str(server.get("id"))
+        idx = server.get("idx", 0)
+        access_control = (
+            request.app.state.config.TOOL_SERVER_CONNECTIONS[idx]
+            .get("config", {})
+            .get("access_control", None)
+        )
+        tool_server_ids.append(f"server:{server_id}")
+        openapi_access.append((server_id, access_control))
+
+    # MCP servers live directly in TOOL_SERVER_CONNECTIONS
+    for server in request.app.state.config.TOOL_SERVER_CONNECTIONS:
+        if server.get("type", "openapi") == "mcp":
+            server_id = server.get("info", {}).get("id")
+            if not server_id:
+                continue
+            mcp_server_ids.append(f"server:mcp:{server_id}")
+
+    if user.role == "admin" and BYPASS_ADMIN_ACCESS_CONTROL:
+        return list(dict.fromkeys(local_ids + tool_server_ids + mcp_server_ids))
+
+    user_group_ids = {group.id for group in Groups.get_groups_by_member_id(user.id)}
+
+    filtered_server_ids: list[str] = []
+    for server_id, ac in openapi_access:
+        if has_access(user.id, "read", ac, user_group_ids):
+            filtered_server_ids.append(f"server:{server_id}")
+
+    filtered_mcp_ids: list[str] = []
+    for server in request.app.state.config.TOOL_SERVER_CONNECTIONS:
+        if server.get("type", "openapi") != "mcp":
+            continue
+        server_id = server.get("info", {}).get("id")
+        if not server_id:
+            continue
+        ac = server.get("config", {}).get("access_control", None)
+        if has_access(user.id, "read", ac, user_group_ids):
+            filtered_mcp_ids.append(f"server:mcp:{server_id}")
+
+    return list(dict.fromkeys(local_ids + filtered_server_ids + filtered_mcp_ids))
+
+
 @router.post("/call")
 async def soren_call(
     form_data: SorenCallBody,
@@ -124,9 +192,24 @@ async def soren_call(
 
     tool_ids = extract_tool_ids(model_info.meta, model_info.params)
 
-    # Fallback: workspace tools the user can read (default-enabled)
+    default_tool_ids = await _get_accessible_tool_ids(request, user)
+
+    # If model has no toolIds, use full default (local + servers).
     if not tool_ids:
-        tool_ids = [tool.id for tool in Tools.get_tools_by_user_id(user.id, "read")]
+        tool_ids = default_tool_ids
+    else:
+        # If model specifies only local tools, append accessible tool servers.
+        if not any(tid.startswith("server:") for tid in tool_ids):
+            server_ids = [tid for tid in default_tool_ids if tid.startswith("server:")]
+            tool_ids = list(dict.fromkeys(tool_ids + server_ids))
+
+    log.info(
+        "soren_call toolIds resolved (model_id=%s, user_id=%s, count=%s, servers=%s)",
+        model_id,
+        user.id,
+        len(tool_ids),
+        len([tid for tid in tool_ids if tid.startswith("server:")]),
+    )
 
     assistant_message_id = str(uuid.uuid4())
     history_payload = build_history(prompt, assistant_message_id, model_id)

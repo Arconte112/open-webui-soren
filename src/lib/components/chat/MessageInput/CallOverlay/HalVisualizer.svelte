@@ -15,6 +15,7 @@
   export let muted = false;
   export let pushBackSignal = 0;
   export let responseLevel = 0;
+  export let isMobile = false;
 
   const CORE_COLORS: Record<Emotion, string> = {
     neutral: '#ff4444',
@@ -27,6 +28,29 @@
     speaking: '#22d3ee',
     thinking: '#888888'
   } as const;
+
+  const QUALITY_DESKTOP = {
+    pixelRatioMax: 2,
+    starCount: 2500,
+    coreCount: 2200,
+    cloudCount: 2200,
+    enablePostFX: true,
+    bloomStrength: 1.5,
+    bloomRadius: 0.5
+  };
+
+  const QUALITY_MOBILE = {
+    pixelRatioMax: 1.25,
+    starCount: 900,
+    coreCount: 900,
+    cloudCount: 900,
+    enablePostFX: false,
+    bloomStrength: 1.0,
+    bloomRadius: 0.35
+  };
+
+  let quality = QUALITY_DESKTOP;
+  $: quality = isMobile ? QUALITY_MOBILE : QUALITY_DESKTOP;
 
   const vertexShaderSphere = `
     uniform float uTime;
@@ -225,7 +249,7 @@
 
   const createStarField = () => {
     if (!scene) return;
-    const count = 2500;
+    const count = quality.starCount;
     const positions = new Float32Array(count * 3);
     const colors = new Float32Array(count * 3);
     const sizes = new Float32Array(count);
@@ -276,8 +300,8 @@
   const createParticleSphere = () => {
     if (!scene) return;
 
-    const coreCount = 2200;
-    const cloudCount = 2200;
+    const coreCount = quality.coreCount;
+    const cloudCount = quality.cloudCount;
     const count = coreCount + cloudCount;
     const positions = new Float32Array(count * 3);
     const radius = new Float32Array(count);
@@ -361,8 +385,12 @@
     camera = new THREE.PerspectiveCamera(45, width / height, 0.1, 200);
     camera.position.set(0, 0, 4.5);
 
-    renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer = new THREE.WebGLRenderer({
+      antialias: !isMobile,
+      alpha: false,
+      powerPreference: isMobile ? 'low-power' : 'high-performance'
+    });
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, quality.pixelRatioMax));
     renderer.setSize(width, height);
     renderer.setClearColor('#000000', 1);
 
@@ -370,14 +398,24 @@
 
     composer = new EffectComposer(renderer);
     composer.addPass(new RenderPass(scene, camera));
-    afterimagePass = new AfterimagePass(0.85);
-    composer.addPass(afterimagePass);
+    if (quality.enablePostFX) {
+      afterimagePass = new AfterimagePass(0.85);
+      composer.addPass(afterimagePass);
 
-    bloomPass = new UnrealBloomPass(new THREE.Vector2(width, height), 1.5, 0.5, 0.2);
-    bloomPass.threshold = 0.2;
-    bloomPass.strength = 1.5;
-    bloomPass.radius = 0.5;
-    composer.addPass(bloomPass);
+      bloomPass = new UnrealBloomPass(
+        new THREE.Vector2(width, height),
+        quality.bloomStrength,
+        quality.bloomRadius,
+        0.2
+      );
+      bloomPass.threshold = 0.2;
+      bloomPass.strength = quality.bloomStrength;
+      bloomPass.radius = quality.bloomRadius;
+      composer.addPass(bloomPass);
+    } else {
+      afterimagePass = null;
+      bloomPass = null;
+    }
 
     createStarField();
     createParticleSphere();

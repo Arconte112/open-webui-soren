@@ -87,11 +87,12 @@
 	import Banner from '../common/Banner.svelte';
 	import MessageInput from '$lib/components/chat/MessageInput.svelte';
 	import Messages from '$lib/components/chat/Messages.svelte';
-	import Navbar from '$lib/components/chat/Navbar.svelte';
-	import ChatControls from './ChatControls.svelte';
-	import EventConfirmDialog from '../common/ConfirmDialog.svelte';
-	import Placeholder from './Placeholder.svelte';
-	import NotificationToast from '../NotificationToast.svelte';
+import Navbar from '$lib/components/chat/Navbar.svelte';
+import ChatControls from './ChatControls.svelte';
+import CallOverlay from './MessageInput/CallOverlay.svelte';
+import EventConfirmDialog from '../common/ConfirmDialog.svelte';
+import Placeholder from './Placeholder.svelte';
+import NotificationToast from '../NotificationToast.svelte';
 	import Spinner from '../common/Spinner.svelte';
 	import Tooltip from '../common/Tooltip.svelte';
 	import Sidebar from '../icons/Sidebar.svelte';
@@ -2401,6 +2402,21 @@
 		eventCallback(false);
 	}}
 />
+
+{#if $showCallOverlay && $mobile}
+	<CallOverlay
+		bind:files
+		{submitPrompt}
+		{stopResponse}
+		modelId={selectedModelIds?.at(0) ?? null}
+		chatId={$chatId}
+		{eventTarget}
+		fullscreen={true}
+		on:close={() => {
+			showControls.set(false);
+		}}
+	/>
+{/if}
 
 <div
 	class="h-screen max-h-[100dvh] transition-width duration-200 ease-in-out {$showSidebar

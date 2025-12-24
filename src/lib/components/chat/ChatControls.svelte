@@ -3,8 +3,15 @@
 	import { slide } from 'svelte/transition';
 	import { Pane, PaneResizer } from 'paneforge';
 
-	import { onDestroy, onMount, tick } from 'svelte';
-	import { showControls, showCallOverlay, showOverview, showArtifacts, showEmbeds } from '$lib/stores';
+import { onDestroy, onMount, tick } from 'svelte';
+import {
+	showControls,
+	showCallOverlay,
+	showOverview,
+	showArtifacts,
+	showEmbeds,
+	mobile
+} from '$lib/stores';
 
 	import Controls from './Controls/Controls.svelte';
 	import CallOverlay from './MessageInput/CallOverlay.svelte';
@@ -28,10 +35,14 @@
 
 	export let pane;
 
-	let dragged = false;
+let dragged = false;
 
-	let minSize = 0;
-	const SIDEBAR_PX = 360;
+let minSize = 0;
+const SIDEBAR_PX = 360;
+
+let callOverlayInPane = false;
+
+$: callOverlayInPane = $showCallOverlay && !$mobile;
 
 	export const openPane = () => {
 		if (parseInt(localStorage?.chatControlsSize)) {
@@ -150,19 +161,19 @@
 	{#if $showControls}
 		<div class="flex max-h-full min-h-full h-full">
 			<div
-				class="w-full min-h-full h-full {($showOverview || $showArtifacts || $showEmbeds) && !$showCallOverlay
+			class="w-full min-h-full h-full {($showOverview || $showArtifacts || $showEmbeds) && !callOverlayInPane
 					? ' '
-					: $showCallOverlay
+					: callOverlayInPane
 						? 'bg-black'
-						: 'px-4 py-3 bg-white dark:shadow-lg dark:bg-gray-850 '} z-40 pointer-events-auto { $showCallOverlay
+						: 'px-4 py-3 bg-white dark:shadow-lg dark:bg-gray-850 '} z-40 pointer-events-auto { callOverlayInPane
 					? 'overflow-hidden'
 					: 'overflow-y-auto scrollbar-hidden'}"
-				id="controls-container"
-			>
-				{#if $showCallOverlay}
-					<div class="w-full h-full flex justify-center items-stretch">
-						<CallOverlay
-							bind:files
+			id="controls-container"
+		>
+			{#if callOverlayInPane}
+				<div class="w-full h-full flex justify-center items-stretch">
+					<CallOverlay
+						bind:files
 							{submitPrompt}
 							{stopResponse}
 							{modelId}

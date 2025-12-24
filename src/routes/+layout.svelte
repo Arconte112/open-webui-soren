@@ -92,7 +92,20 @@
 
 	let heartbeatInterval = null;
 
-	const BREAKPOINT = 768;
+	const isRealMobileDevice = () => {
+		if (typeof navigator === 'undefined') return false;
+
+		const ua = (navigator.userAgent || navigator.vendor || window.opera || '').toLowerCase();
+		const uaDataMobile = navigator.userAgentData?.mobile === true;
+		const hasTouch = navigator.maxTouchPoints > 0 || 'ontouchstart' in window;
+			const uaHints =
+				/(android|webos|iphone|ipad|ipod|blackberry|bb10|iemobile|opera mini|mobile|tablet|silk|kindle|playbook)/i.test(
+					ua
+				) ||
+				(/macintosh/i.test(ua) && navigator.maxTouchPoints > 1); // iPadOS 13+ reports as Macintosh
+
+		return hasTouch && (uaDataMobile || uaHints);
+	};
 
 	const setupSocket = async (enableWebsocket) => {
 		const _socket = io(`${WEBUI_BASE_URL}` || undefined, {
@@ -669,14 +682,10 @@
 
 		theme.set(localStorage.theme);
 
-		mobile.set(window.innerWidth < BREAKPOINT);
+		mobile.set(isRealMobileDevice());
 
 		const onResize = () => {
-			if (window.innerWidth < BREAKPOINT) {
-				mobile.set(true);
-			} else {
-				mobile.set(false);
-			}
+			mobile.set(isRealMobileDevice());
 		};
 		window.addEventListener('resize', onResize);
 
