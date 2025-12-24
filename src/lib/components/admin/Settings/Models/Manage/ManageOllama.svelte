@@ -453,11 +453,6 @@
 				$config?.features?.enable_direct_connections && ($settings?.directConnections ?? null)
 			)
 		);
-
-		ollamaModels = await getOllamaModels(localStorage.token, urlIdx).catch((error) => {
-			toast.error(`${error}`);
-			return null;
-		});
 	};
 
 	const cancelUpdateModelHandler = async (model: string) => {

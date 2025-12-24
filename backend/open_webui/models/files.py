@@ -3,10 +3,12 @@ import time
 from typing import Optional
 
 from open_webui.internal.db import Base, JSONField, get_db
+from open_webui.env import SRC_LOG_LEVELS
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy import BigInteger, Column, String, Text, JSON
 
 log = logging.getLogger(__name__)
+log.setLevel(SRC_LOG_LEVELS["MODELS"])
 
 ####################
 # Files DB Schema
@@ -81,7 +83,7 @@ class FileModelResponse(BaseModel):
 class FileMetadataResponse(BaseModel):
     id: str
     hash: Optional[str] = None
-    meta: Optional[dict] = None
+    meta: dict
     created_at: int  # timestamp in epoch
     updated_at: int  # timestamp in epoch
 
@@ -100,11 +102,6 @@ class FileUpdateForm(BaseModel):
     hash: Optional[str] = None
     data: Optional[dict] = None
     meta: Optional[dict] = None
-
-
-class FileListResponse(BaseModel):
-    items: list[FileModel]
-    total: int
 
 
 class FilesTable:
@@ -241,7 +238,6 @@ class FilesTable:
             try:
                 file = db.query(File).filter_by(id=id).first()
                 file.hash = hash
-                file.updated_at = int(time.time())
                 db.commit()
 
                 return FileModel.model_validate(file)
@@ -253,7 +249,6 @@ class FilesTable:
             try:
                 file = db.query(File).filter_by(id=id).first()
                 file.data = {**(file.data if file.data else {}), **data}
-                file.updated_at = int(time.time())
                 db.commit()
                 return FileModel.model_validate(file)
             except Exception as e:
@@ -265,7 +260,6 @@ class FilesTable:
             try:
                 file = db.query(File).filter_by(id=id).first()
                 file.meta = {**(file.meta if file.meta else {}), **meta}
-                file.updated_at = int(time.time())
                 db.commit()
                 return FileModel.model_validate(file)
             except Exception:

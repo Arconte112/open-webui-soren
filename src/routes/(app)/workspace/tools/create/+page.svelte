@@ -87,7 +87,7 @@
 			name={tool?.name ?? ''}
 			meta={tool?.meta ?? { description: '' }}
 			content={tool?.content ?? ''}
-			accessControl={tool?.access_control !== undefined ? tool.access_control : {}}
+			access_control={null}
 			{clone}
 			onSave={(value) => {
 				saveHandler(value);

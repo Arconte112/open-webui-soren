@@ -85,7 +85,32 @@ if "cuda_error" in locals():
     log.exception(cuda_error)
     del cuda_error
 
-SRC_LOG_LEVELS = {}  # Legacy variable, do not remove
+log_sources = [
+    "AUDIO",
+    "COMFYUI",
+    "CONFIG",
+    "DB",
+    "IMAGES",
+    "MAIN",
+    "MODELS",
+    "OLLAMA",
+    "OPENAI",
+    "RAG",
+    "WEBHOOK",
+    "SOCKET",
+    "OAUTH",
+]
+
+SRC_LOG_LEVELS = {}
+
+for source in log_sources:
+    log_env_var = source + "_LOG_LEVEL"
+    SRC_LOG_LEVELS[source] = os.environ.get(log_env_var, "").upper()
+    if SRC_LOG_LEVELS[source] not in logging.getLevelNamesMapping():
+        SRC_LOG_LEVELS[source] = GLOBAL_LOG_LEVEL
+    log.info(f"{log_env_var}: {SRC_LOG_LEVELS[source]}")
+
+log.setLevel(SRC_LOG_LEVELS["CONFIG"])
 
 WEBUI_NAME = os.environ.get("WEBUI_NAME", "Open WebUI")
 if WEBUI_NAME != "Open WebUI":
@@ -339,11 +364,6 @@ if DATABASE_USER_ACTIVE_STATUS_UPDATE_INTERVAL is not None:
     except Exception:
         DATABASE_USER_ACTIVE_STATUS_UPDATE_INTERVAL = 0.0
 
-# Enable public visibility of active user count (when disabled, only admins can see it)
-ENABLE_PUBLIC_ACTIVE_USERS_COUNT = (
-    os.environ.get("ENABLE_PUBLIC_ACTIVE_USERS_COUNT", "True").lower() == "true"
-)
-
 RESET_CONFIG_ON_START = (
     os.environ.get("RESET_CONFIG_ON_START", "False").lower() == "true"
 )
@@ -374,13 +394,6 @@ try:
         REDIS_SENTINEL_MAX_RETRY_COUNT = 2
 except ValueError:
     REDIS_SENTINEL_MAX_RETRY_COUNT = 2
-
-
-REDIS_SOCKET_CONNECT_TIMEOUT = os.environ.get("REDIS_SOCKET_CONNECT_TIMEOUT", "")
-try:
-    REDIS_SOCKET_CONNECT_TIMEOUT = float(REDIS_SOCKET_CONNECT_TIMEOUT)
-except ValueError:
-    REDIS_SOCKET_CONNECT_TIMEOUT = None
 
 ####################################
 # UVICORN WORKERS
@@ -426,13 +439,7 @@ PASSWORD_VALIDATION_REGEX_PATTERN = os.environ.get(
     "^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^\w\s]).{8,}$",
 )
 
-try:
-    PASSWORD_VALIDATION_REGEX_PATTERN = re.compile(PASSWORD_VALIDATION_REGEX_PATTERN)
-except Exception as e:
-    log.error(f"Invalid PASSWORD_VALIDATION_REGEX_PATTERN: {e}")
-    PASSWORD_VALIDATION_REGEX_PATTERN = re.compile(
-        "^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^\w\s]).{8,}$"
-    )
+PASSWORD_VALIDATION_REGEX_PATTERN = re.compile(PASSWORD_VALIDATION_REGEX_PATTERN)
 
 
 BYPASS_MODEL_ACCESS_CONTROL = (
@@ -539,10 +546,6 @@ if LICENSE_PUBLIC_KEY:
 # MODELS
 ####################################
 
-ENABLE_CUSTOM_MODEL_FALLBACK = (
-    os.environ.get("ENABLE_CUSTOM_MODEL_FALLBACK", "False").lower() == "true"
-)
-
 MODELS_CACHE_TTL = os.environ.get("MODELS_CACHE_TTL", "1")
 if MODELS_CACHE_TTL == "":
     MODELS_CACHE_TTL = None
@@ -617,16 +620,9 @@ ENABLE_WEBSOCKET_SUPPORT = (
 WEBSOCKET_MANAGER = os.environ.get("WEBSOCKET_MANAGER", "")
 
 WEBSOCKET_REDIS_OPTIONS = os.environ.get("WEBSOCKET_REDIS_OPTIONS", "")
-
-
 if WEBSOCKET_REDIS_OPTIONS == "":
-    if REDIS_SOCKET_CONNECT_TIMEOUT:
-        WEBSOCKET_REDIS_OPTIONS = {
-            "socket_connect_timeout": REDIS_SOCKET_CONNECT_TIMEOUT
-        }
-    else:
-        log.debug("No WEBSOCKET_REDIS_OPTIONS provided, defaulting to None")
-        WEBSOCKET_REDIS_OPTIONS = None
+    log.debug("No WEBSOCKET_REDIS_OPTIONS provided, defaulting to None")
+    WEBSOCKET_REDIS_OPTIONS = None
 else:
     try:
         WEBSOCKET_REDIS_OPTIONS = json.loads(WEBSOCKET_REDIS_OPTIONS)

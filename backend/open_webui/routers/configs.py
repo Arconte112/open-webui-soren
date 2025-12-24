@@ -18,6 +18,7 @@ from open_webui.utils.tools import (
 from open_webui.utils.mcp.client import MCPClient
 from open_webui.models.oauth_sessions import OAuthSessions
 
+from open_webui.env import SRC_LOG_LEVELS
 
 from open_webui.utils.oauth import (
     get_discovery_urls,
@@ -31,6 +32,7 @@ from mcp.shared.auth import OAuthMetadata
 router = APIRouter()
 
 log = logging.getLogger(__name__)
+log.setLevel(SRC_LOG_LEVELS["MAIN"])
 
 
 ############################

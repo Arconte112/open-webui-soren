@@ -109,17 +109,10 @@
 
 		webhookUrl = $settings?.notifications?.webhook_url ?? '';
 
-		// Only fetch API key if the feature is enabled and user has permission
-		if (
-			user &&
-			($config?.features?.enable_api_keys ?? true) &&
-			(user?.role === 'admin' || (user?.permissions?.features?.api_keys ?? false))
-		) {
-			APIKey = await getAPIKey(localStorage.token).catch((error) => {
-				console.log(error);
-				return '';
-			});
-		}
+		APIKey = await getAPIKey(localStorage.token).catch((error) => {
+			console.log(error);
+			return '';
+		});
 
 		loaded = true;
 	});

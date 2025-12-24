@@ -3,8 +3,10 @@ from typing import Optional
 
 import requests
 from open_webui.retrieval.web.main import SearchResult, get_filtered_results
+from open_webui.env import SRC_LOG_LEVELS
 
 log = logging.getLogger(__name__)
+log.setLevel(SRC_LOG_LEVELS["RAG"])
 
 
 def search_searxng(
@@ -25,7 +27,7 @@ def search_searxng(
         count (int): The maximum number of results to retrieve from the search.
 
     Keyword Args:
-        language (str): Language filter for the search results; e.g., "all", "en-US", "es". Defaults to "all".
+        language (str): Language filter for the search results; e.g., "en-US". Defaults to an empty string.
         safesearch (int): Safe search filter for safer web results; 0 = off, 1 = moderate, 2 = strict. Defaults to 1 (moderate).
         time_range (str): Time range for filtering results by date; e.g., "2023-04-05..today" or "all-time". Defaults to ''.
         categories: (Optional[list[str]]): Specific categories within which the search should be performed, defaulting to an empty string if not provided.
@@ -38,7 +40,7 @@ def search_searxng(
     """
 
     # Default values for optional parameters are provided as empty strings or None when not specified.
-    language = kwargs.get("language", "all")
+    language = kwargs.get("language", "en-US")
     safesearch = kwargs.get("safesearch", "1")
     time_range = kwargs.get("time_range", "")
     categories = "".join(kwargs.get("categories", []))

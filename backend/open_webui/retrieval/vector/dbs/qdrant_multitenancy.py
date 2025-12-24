@@ -13,6 +13,7 @@ from open_webui.config import (
     QDRANT_TIMEOUT,
     QDRANT_HNSW_M,
 )
+from open_webui.env import SRC_LOG_LEVELS
 from open_webui.retrieval.vector.main import (
     GetResult,
     SearchResult,
@@ -29,6 +30,7 @@ TENANT_ID_FIELD = "tenant_id"
 DEFAULT_DIMENSION = 384
 
 log = logging.getLogger(__name__)
+log.setLevel(SRC_LOG_LEVELS["RAG"])
 
 
 def _tenant_filter(tenant_id: str) -> models.FieldCondition:

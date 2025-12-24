@@ -75,11 +75,12 @@
 			`<sup class="footnote-ref footnote-ref-text">${token.escapedText}</sup>`
 		) || ''}
 	{:else if token.type === 'citation'}
-		{#if (sourceIds ?? []).length > 0}
-			<SourceToken {id} {token} {sourceIds} onClick={onSourceClick} />
-		{:else}
-			<TextToken {token} {done} />
-		{/if}
+		<SourceToken {id} {token} {sourceIds} onClick={onSourceClick} />
+		<!-- {#if token.ids && token.ids.length > 0}
+			{#each token.ids as sourceId}
+				<Source id={sourceId - 1} title={sourceIds[sourceId - 1]} onClick={onSourceClick} />
+			{/each}
+		{/if} -->
 	{:else if token.type === 'text'}
 		<TextToken {token} {done} />
 	{/if}

@@ -2,7 +2,7 @@
 	import { getContext, onMount } from 'svelte';
 	import { config, knowledge, settings, user } from '$lib/stores';
 
-	import KnowledgeSelector from './Knowledge/KnowledgeSelector.svelte';
+	import Selector from './Knowledge/Selector.svelte';
 	import FileItem from '$lib/components/common/FileItem.svelte';
 
 	import { getKnowledgeBases } from '$lib/apis/knowledge';
@@ -80,7 +80,7 @@
 				fileItem.id = uploadedFile.id;
 				fileItem.collection_name =
 					uploadedFile?.meta?.collection_name || uploadedFile?.collection_name;
-				fileItem.url = `${uploadedFile.id}`;
+				fileItem.url = `${WEBUI_API_BASE_URL}/files/${uploadedFile.id}`;
 
 				selectedItems = selectedItems;
 			} else {
@@ -128,6 +128,9 @@
 	};
 
 	onMount(async () => {
+		if (!$knowledge) {
+			knowledge.set(await getKnowledgeBases(localStorage.token));
+		}
 		loaded = true;
 	});
 </script>
@@ -187,7 +190,8 @@
 
 		{#if loaded}
 			<div class="flex flex-wrap flex-row text-sm gap-1">
-				<KnowledgeSelector
+				<Selector
+					knowledgeItems={$knowledge || []}
 					on:select={(e) => {
 						const item = e.detail;
 
@@ -206,7 +210,7 @@
 					>
 						{$i18n.t('Select Knowledge')}
 					</div>
-				</KnowledgeSelector>
+				</Selector>
 
 				{#if $user?.role === 'admin' || $user?.permissions?.chat?.file_upload}
 					<button

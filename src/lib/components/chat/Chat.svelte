@@ -53,8 +53,7 @@
 		getPromptVariables,
 		processDetails,
 		removeAllDetails,
-		getCodeBlockContents,
-		isYoutubeUrl
+		getCodeBlockContents
 	} from '$lib/utils';
 	import { AudioQueue } from '$lib/utils/audio';
 
@@ -774,7 +773,7 @@ import NotificationToast from '../NotificationToast.svelte';
 			fileItem.id = uploadedFile.id;
 			fileItem.size = file.size;
 			fileItem.collection_name = uploadedFile?.meta?.collection_name;
-			fileItem.url = `${uploadedFile.id}`;
+			fileItem.url = `${WEBUI_API_BASE_URL}/files/${uploadedFile.id}`;
 
 			files = files;
 			toast.success($i18n.t('File uploaded successfully'));
@@ -789,55 +788,69 @@ import NotificationToast from '../NotificationToast.svelte';
 		}
 	};
 
-	const uploadWeb = async (urls) => {
-		if (!Array.isArray(urls)) {
-			urls = [urls];
-		}
+	const uploadWeb = async (url) => {
+		console.log(url);
 
-		// Create file items first
-		const fileItems = urls.map((url) => ({
+		const fileItem = {
+			type: 'text',
+			name: url,
+			collection_name: '',
+			status: 'uploading',
+			url: url,
+			error: ''
+		};
+
+		try {
+			files = [...files, fileItem];
+			const res = await processWeb(localStorage.token, '', url);
+
+			if (res) {
+				fileItem.status = 'uploaded';
+				fileItem.collection_name = res.collection_name;
+				fileItem.file = {
+					...res.file,
+					...fileItem.file
+				};
+
+				files = files;
+			}
+		} catch (e) {
+			// Remove the failed doc from the files array
+			files = files.filter((f) => f.name !== url);
+			toast.error(JSON.stringify(e));
+		}
+	};
+
+	const uploadYoutubeTranscription = async (url) => {
+		console.log(url);
+
+		const fileItem = {
 			type: 'text',
 			name: url,
 			collection_name: '',
 			status: 'uploading',
 			context: 'full',
-			url,
+			url: url,
 			error: ''
-		}));
+		};
 
-		// Display all items at once
-		files = [...files, ...fileItems];
+		try {
+			files = [...files, fileItem];
+			const res = await processYoutubeVideo(localStorage.token, url);
 
-		for (const fileItem of fileItems) {
-			try {
-				const res = isYoutubeUrl(fileItem.url)
-					? await processYoutubeVideo(localStorage.token, fileItem.url)
-					: await processWeb(localStorage.token, '', fileItem.url);
-
-				if (res) {
-					fileItem.status = 'uploaded';
-					fileItem.collection_name = res.collection_name;
-					fileItem.file = {
-						...res.file,
-						...fileItem.file
-					};
-				}
-
-				files = [...files];
-			} catch (e) {
-				files = files.filter((f) => f.name !== url);
-				toast.error(`${e}`);
+			if (res) {
+				fileItem.status = 'uploaded';
+				fileItem.collection_name = res.collection_name;
+				fileItem.file = {
+					...res.file,
+					...fileItem.file
+				};
+				files = files;
 			}
-		}
-	};
-
-	const onUpload = async (event) => {
-		const { type, data } = event;
-
-		if (type === 'google-drive') {
-			await uploadGoogleDriveFile(data);
-		} else if (type === 'web') {
-			await uploadWeb(data);
+		} catch (e) {
+			// Remove the failed doc from the files array
+			files = files.filter((f) => f.name !== url);
+			toast.error(`${e}`);
 		}
 	};
 
@@ -904,15 +917,8 @@ import NotificationToast from '../NotificationToast.svelte';
 
 	const initNewChat = async () => {
 		console.log('initNewChat');
-		if ($user?.role !== 'admin') {
-			if ($user?.permissions?.chat?.temporary_enforced) {
-				await temporaryChatEnabled.set(true);
-			}
-
-			if (!$user?.permissions?.chat?.temporary) {
-				await temporaryChatEnabled.set(false);
-				return;
-			}
+		if ($user?.role !== 'admin' && $user?.permissions?.chat?.temporary_enforced) {
+			await temporaryChatEnabled.set(true);
 		}
 
 		if ($settings?.temporaryChatByDefault ?? false) {
@@ -1012,7 +1018,9 @@ import NotificationToast from '../NotificationToast.svelte';
 		params = {};
 
 		if ($page.url.searchParams.get('youtube')) {
-			await uploadWeb(`https://www.youtube.com/watch?v=${$page.url.searchParams.get('youtube')}`);
+			uploadYoutubeTranscription(
+				`https://www.youtube.com/watch?v=${$page.url.searchParams.get('youtube')}`
+			);
 		}
 
 		if ($page.url.searchParams.get('load-url')) {
@@ -1628,10 +1636,8 @@ import NotificationToast from '../NotificationToast.svelte';
 		const _files = JSON.parse(JSON.stringify(files));
 
 		chatFiles.push(
-			..._files.filter(
-				(item) =>
-					['doc', 'text', 'note', 'chat', 'folder', 'collection'].includes(item.type) ||
-					(item.type === 'file' && !(item?.content_type ?? '').startsWith('image/'))
+			..._files.filter((item) =>
+				['doc', 'text', 'file', 'note', 'chat', 'folder', 'collection'].includes(item.type)
 			)
 		);
 		chatFiles = chatFiles.filter(
@@ -1759,9 +1765,7 @@ import NotificationToast from '../NotificationToast.svelte';
 				if (model) {
 					// If there are image files, check if model is vision capable
 					const hasImages = createMessagesList(_history, parentId).some((message) =>
-						message.files?.some(
-							(file) => file.type === 'image' || file?.content_type?.startsWith('image/')
-						)
+						message.files?.some((file) => file.type === 'image')
 					);
 
 					if (hasImages && !(model.info?.meta?.capabilities?.vision ?? true)) {
@@ -1855,10 +1859,8 @@ import NotificationToast from '../NotificationToast.svelte';
 
 		let files = JSON.parse(JSON.stringify(chatFiles));
 		files.push(
-			...(userMessage?.files ?? []).filter(
-				(item) =>
-					['doc', 'text', 'note', 'chat', 'collection'].includes(item.type) ||
-					(item.type === 'file' && !(item?.content_type ?? '').startsWith('image/'))
+			...(userMessage?.files ?? []).filter((item) =>
+				['doc', 'text', 'file', 'note', 'chat', 'collection'].includes(item.type)
 			)
 		);
 		// Remove duplicates
@@ -1904,34 +1906,32 @@ import NotificationToast from '../NotificationToast.svelte';
 			}))
 		].filter((message) => message);
 
-		messages = messages
-			.map((message, idx, arr) => {
-				const imageFiles = (message?.files ?? []).filter(
-					(file) => file.type === 'image' || (file?.content_type ?? '').startsWith('image/')
-				);
-
-				return {
-					role: message.role,
-					...(message.role === 'user' && imageFiles.length > 0
-						? {
-								content: [
-									{
-										type: 'text',
-										text: message?.merged?.content ?? message.content
-									},
-									...imageFiles.map((file) => ({
+	messages = messages
+		.map((message, idx, arr) => ({
+			role: message.role,
+			timestamp: message.timestamp,
+			...((message.files?.filter((file) => file.type === 'image').length > 0 ?? false) &&
+			message.role === 'user'
+				? {
+						content: [
+								{
+									type: 'text',
+									text: message?.merged?.content ?? message.content
+								},
+								...message.files
+									.filter((file) => file.type === 'image')
+									.map((file) => ({
 										type: 'image_url',
 										image_url: {
 											url: file.url
 										}
 									}))
-								]
-							}
-						: {
-								content: message?.merged?.content ?? message.content
-							})
-				};
-			})
+							]
+						}
+					: {
+							content: message?.merged?.content ?? message.content
+						})
+			}))
 			.filter((message) => message?.role === 'user' || message?.content?.trim());
 
 		const toolIds = [];
@@ -1986,7 +1986,6 @@ import NotificationToast from '../NotificationToast.svelte';
 
 				id: responseMessageId,
 				parent_id: userMessage?.id ?? null,
-				parent_message: userMessage,
 
 				background_tasks: {
 					...(!$temporaryChatEnabled &&
@@ -2233,17 +2232,14 @@ import NotificationToast from '../NotificationToast.svelte';
 			generating = true;
 			const [res, controller] = await generateMoACompletion(
 				localStorage.token,
-				message.model ?? '',
-				message.parentId ? history.messages[message.parentId].content : '',
+				message.model,
+				history.messages[message.parentId].content,
 				responses
 			);
 
 			if (res && res.ok && res.body && generating) {
-				generationController = controller as AbortController;
-				const textStream = await createOpenAITextStream(
-					res.body,
-					Boolean($settings?.splitLargeChunks ?? false)
-				);
+				generationController = controller;
+				const textStream = await createOpenAITextStream(res.body, $settings.splitLargeChunks);
 				for await (const update of textStream) {
 					const { value, done, sources, error, usage } = update;
 					if (error || done) {
@@ -2330,7 +2326,7 @@ import NotificationToast from '../NotificationToast.svelte';
 	};
 
 	const MAX_DRAFT_LENGTH = 5000;
-	let saveDraftTimeout: ReturnType<typeof setTimeout> | null = null;
+	let saveDraftTimeout = null;
 
 	const saveDraft = async (draft, chatId = null) => {
 		if (saveDraftTimeout) {
@@ -2424,7 +2420,7 @@ import NotificationToast from '../NotificationToast.svelte';
 
 <div
 	class="h-screen max-h-[100dvh] transition-width duration-200 ease-in-out {$showSidebar
-		? '  md:max-w-[calc(100%-var(--sidebar-width))]'
+		? '  md:max-w-[calc(100%-260px)]'
 		: ' '} w-full max-w-full flex flex-col"
 	id="chat-container"
 >
@@ -2573,10 +2569,20 @@ import NotificationToast from '../NotificationToast.svelte';
 									on:reasoningchange={(e) => {
 										handleReasoningChange(e.detail);
 									}}
-									{onUpload}
 									onChange={(data) => {
 										if (!$temporaryChatEnabled) {
 											saveDraft(data, $chatId);
+										}
+									}}
+									on:upload={async (e) => {
+										const { type, data } = e.detail;
+
+										if (type === 'web') {
+											await uploadWeb(data);
+										} else if (type === 'youtube') {
+											await uploadYoutubeTranscription(data);
+										} else if (type === 'google-drive') {
+											await uploadGoogleDriveFile(data);
 										}
 									}}
 									on:submit={async (e) => {
@@ -2619,10 +2625,18 @@ import NotificationToast from '../NotificationToast.svelte';
 									on:reasoningchange={(e) => {
 										handleReasoningChange(e.detail);
 									}}
-									{onUpload}
 									onChange={(data) => {
 										if (!$temporaryChatEnabled) {
 											saveDraft(data);
+										}
+									}}
+									on:upload={async (e) => {
+										const { type, data } = e.detail;
+
+										if (type === 'web') {
+											await uploadWeb(data);
+										} else if (type === 'youtube') {
+											await uploadYoutubeTranscription(data);
 										}
 									}}
 									on:submit={async (e) => {

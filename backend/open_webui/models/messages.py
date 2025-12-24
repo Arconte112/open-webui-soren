@@ -9,7 +9,7 @@ from open_webui.models.users import Users, User, UserNameResponse
 from open_webui.models.channels import Channels, ChannelMember
 
 
-from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic import BaseModel, ConfigDict
 from sqlalchemy import BigInteger, Boolean, Column, String, Text, JSON
 from sqlalchemy import or_, func, select, and_, text
 from sqlalchemy.sql import exists
@@ -108,24 +108,11 @@ class MessageUserResponse(MessageModel):
     user: Optional[UserNameResponse] = None
 
 
-class MessageUserSlimResponse(MessageUserResponse):
-    data: bool | None = None
-
-    @field_validator("data", mode="before")
-    def convert_data_to_bool(cls, v):
-        # No data or not a dict → False
-        if not isinstance(v, dict):
-            return False
-
-        # True if ANY value in the dict is non-empty
-        return any(bool(val) for val in v.values())
-
-
 class MessageReplyToResponse(MessageUserResponse):
-    reply_to_message: Optional[MessageUserSlimResponse] = None
+    reply_to_message: Optional[MessageUserResponse] = None
 
 
-class MessageWithReactionsResponse(MessageUserSlimResponse):
+class MessageWithReactionsResponse(MessageUserResponse):
     reactions: list[Reactions]
 
 

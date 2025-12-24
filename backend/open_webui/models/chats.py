@@ -7,20 +7,10 @@ from typing import Optional
 from open_webui.internal.db import Base, get_db
 from open_webui.models.tags import TagModel, Tag, Tags
 from open_webui.models.folders import Folders
-from open_webui.utils.misc import sanitize_data_for_db, sanitize_text_for_db
+from open_webui.env import SRC_LOG_LEVELS
 
 from pydantic import BaseModel, ConfigDict
-from sqlalchemy import (
-    BigInteger,
-    Boolean,
-    Column,
-    ForeignKey,
-    String,
-    Text,
-    JSON,
-    Index,
-    UniqueConstraint,
-)
+from sqlalchemy import BigInteger, Boolean, Column, String, Text, JSON, Index
 from sqlalchemy import or_, func, select, and_, text
 from sqlalchemy.sql import exists
 from sqlalchemy.sql.expression import bindparam
@@ -30,6 +20,7 @@ from sqlalchemy.sql.expression import bindparam
 ####################
 
 log = logging.getLogger(__name__)
+log.setLevel(SRC_LOG_LEVELS["MODELS"])
 
 
 class Chat(Base):
@@ -84,38 +75,6 @@ class ChatModel(BaseModel):
     folder_id: Optional[str] = None
 
 
-class ChatFile(Base):
-    __tablename__ = "chat_file"
-
-    id = Column(Text, unique=True, primary_key=True)
-    user_id = Column(Text, nullable=False)
-
-    chat_id = Column(Text, ForeignKey("chat.id", ondelete="CASCADE"), nullable=False)
-    message_id = Column(Text, nullable=True)
-    file_id = Column(Text, ForeignKey("file.id", ondelete="CASCADE"), nullable=False)
-
-    created_at = Column(BigInteger, nullable=False)
-    updated_at = Column(BigInteger, nullable=False)
-
-    __table_args__ = (
-        UniqueConstraint("chat_id", "file_id", name="uq_chat_file_chat_file"),
-    )
-
-
-class ChatFileModel(BaseModel):
-    id: str
-    user_id: str
-
-    chat_id: str
-    message_id: Optional[str] = None
-    file_id: str
-
-    created_at: int
-    updated_at: int
-
-    model_config = ConfigDict(from_attributes=True)
-
-
 ####################
 # Forms
 ####################
@@ -167,53 +126,20 @@ class ChatTitleIdResponse(BaseModel):
     created_at: int
 
 
-class ChatListResponse(BaseModel):
-    items: list[ChatModel]
-    total: int
-
-
-class ChatUsageStatsResponse(BaseModel):
-    id: str  # chat id
-
-    models: dict = {}  # models used in the chat with their usage counts
-    message_count: int  # number of messages in the chat
-
-    history_models: dict = {}  # models used in the chat history with their usage counts
-    history_message_count: int  # number of messages in the chat history
-    history_user_message_count: int  # number of user messages in the chat history
-    history_assistant_message_count: (
-        int  # number of assistant messages in the chat history
-    )
-
-    average_response_time: (
-        float  # average response time of assistant messages in seconds
-    )
-    average_user_message_content_length: (
-        float  # average length of user message contents
-    )
-    average_assistant_message_content_length: (
-        float  # average length of assistant message contents
-    )
-
-    tags: list[str] = []  # tags associated with the chat
-
-    last_message_at: int  # timestamp of the last message
-    updated_at: int
-    created_at: int
-
-    model_config = ConfigDict(extra="allow")
-
-
-class ChatUsageStatsListResponse(BaseModel):
-    items: list[ChatUsageStatsResponse]
-    total: int
-    model_config = ConfigDict(extra="allow")
-
-
 class ChatTable:
     def _clean_null_bytes(self, obj):
-        """Recursively remove null bytes from strings in dict/list structures."""
-        return sanitize_data_for_db(obj)
+        """
+        Recursively remove actual null bytes (\x00) and unicode escape \\u0000
+        from strings inside dict/list structures.
+        Safe for JSON objects.
+        """
+        if isinstance(obj, str):
+            return obj.replace("\x00", "").replace("\u0000", "")
+        elif isinstance(obj, dict):
+            return {k: self._clean_null_bytes(v) for k, v in obj.items()}
+        elif isinstance(obj, list):
+            return [self._clean_null_bytes(v) for v in obj]
+        return obj
 
     def _sanitize_chat_row(self, chat_item):
         """
@@ -384,7 +310,7 @@ class ChatTable:
 
         # Sanitize message content for null characters before upserting
         if isinstance(message.get("content"), str):
-            message["content"] = sanitize_text_for_db(message["content"])
+            message["content"] = message["content"].replace("\x00", "")
 
         chat = chat.chat
         history = chat.get("history", {})
@@ -749,31 +675,14 @@ class ChatTable:
             )
             return [ChatModel.model_validate(chat) for chat in all_chats]
 
-    def get_chats_by_user_id(
-        self, user_id: str, skip: Optional[int] = None, limit: Optional[int] = None
-    ) -> ChatListResponse:
+    def get_chats_by_user_id(self, user_id: str) -> list[ChatModel]:
         with get_db() as db:
-            query = (
+            all_chats = (
                 db.query(Chat)
                 .filter_by(user_id=user_id)
                 .order_by(Chat.updated_at.desc())
             )
-
-            total = query.count()
-
-            if skip is not None:
-                query = query.offset(skip)
-            if limit is not None:
-                query = query.limit(limit)
-
-            all_chats = query.all()
-
-            return ChatListResponse(
-                **{
-                    "items": [ChatModel.model_validate(chat) for chat in all_chats],
-                    "total": total,
-                }
-            )
+            return [ChatModel.model_validate(chat) for chat in all_chats]
 
     def get_pinned_chats_by_user_id(self, user_id: str) -> list[ChatModel]:
         with get_db() as db:
@@ -804,7 +713,7 @@ class ChatTable:
         """
         Filters chats based on a search query using Python, allowing pagination using skip and limit.
         """
-        search_text = sanitize_text_for_db(search_text).lower().strip()
+        search_text = search_text.replace("\u0000", "").lower().strip()
 
         if not search_text:
             return self.get_chat_list_by_user_id(
@@ -1260,94 +1169,6 @@ class ChatTable:
                 return True
         except Exception:
             return False
-
-    def insert_chat_files(
-        self, chat_id: str, message_id: str, file_ids: list[str], user_id: str
-    ) -> Optional[list[ChatFileModel]]:
-        if not file_ids:
-            return None
-
-        chat_message_file_ids = [
-            item.id
-            for item in self.get_chat_files_by_chat_id_and_message_id(
-                chat_id, message_id
-            )
-        ]
-        # Remove duplicates and existing file_ids
-        file_ids = list(
-            set(
-                [
-                    file_id
-                    for file_id in file_ids
-                    if file_id and file_id not in chat_message_file_ids
-                ]
-            )
-        )
-        if not file_ids:
-            return None
-
-        try:
-            with get_db() as db:
-                now = int(time.time())
-
-                chat_files = [
-                    ChatFileModel(
-                        id=str(uuid.uuid4()),
-                        user_id=user_id,
-                        chat_id=chat_id,
-                        message_id=message_id,
-                        file_id=file_id,
-                        created_at=now,
-                        updated_at=now,
-                    )
-                    for file_id in file_ids
-                ]
-
-                results = [
-                    ChatFile(**chat_file.model_dump()) for chat_file in chat_files
-                ]
-
-                db.add_all(results)
-                db.commit()
-
-                return chat_files
-        except Exception:
-            return None
-
-    def get_chat_files_by_chat_id_and_message_id(
-        self, chat_id: str, message_id: str
-    ) -> list[ChatFileModel]:
-        with get_db() as db:
-            all_chat_files = (
-                db.query(ChatFile)
-                .filter_by(chat_id=chat_id, message_id=message_id)
-                .order_by(ChatFile.created_at.asc())
-                .all()
-            )
-            return [
-                ChatFileModel.model_validate(chat_file) for chat_file in all_chat_files
-            ]
-
-    def delete_chat_file(self, chat_id: str, file_id: str) -> bool:
-        try:
-            with get_db() as db:
-                db.query(ChatFile).filter_by(chat_id=chat_id, file_id=file_id).delete()
-                db.commit()
-                return True
-        except Exception:
-            return False
-
-    def get_shared_chats_by_file_id(self, file_id: str) -> list[ChatModel]:
-        with get_db() as db:
-            # Join Chat and ChatFile tables to get shared chats associated with the file_id
-            all_chats = (
-                db.query(Chat)
-                .join(ChatFile, Chat.id == ChatFile.chat_id)
-                .filter(ChatFile.file_id == file_id, Chat.share_id.isnot(None))
-                .all()
-            )
-
-            return [ChatModel.model_validate(chat) for chat in all_chats]
 
 
 Chats = ChatTable()

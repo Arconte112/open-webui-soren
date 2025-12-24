@@ -1,13 +1,11 @@
 <script>
-	import { toast } from 'svelte-sonner';
-
 	import { goto } from '$app/navigation';
 	import { getContext } from 'svelte';
 	const i18n = getContext('i18n');
 
-	import { user } from '$lib/stores';
-	import { createNewKnowledge } from '$lib/apis/knowledge';
-
+	import { createNewKnowledge, getKnowledgeBases } from '$lib/apis/knowledge';
+	import { toast } from 'svelte-sonner';
+	import { knowledge, user } from '$lib/stores';
 	import AccessControl from '../common/AccessControl.svelte';
 	import Spinner from '$lib/components/common/Spinner.svelte';
 
@@ -39,6 +37,7 @@
 
 		if (res) {
 			toast.success($i18n.t('Knowledge created successfully.'));
+			knowledge.set(await getKnowledgeBases(localStorage.token));
 			goto(`/workspace/knowledge/${res.id}`);
 		}
 

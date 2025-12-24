@@ -364,7 +364,7 @@
 							type="button"
 							class="rounded-lg p-1 transition outline-gray-200 hover:bg-gray-100 dark:outline-gray-700 dark:hover:bg-gray-800"
 							on:click={() => {
-								textScale = Math.max(1, parseFloat((textScale - 0.1).toFixed(2)));
+								textScale = Math.max(1, textScale);
 								setTextScaleHandler(textScale);
 							}}
 							aria-labelledby="ui-scale-label"
@@ -397,7 +397,7 @@
 							type="button"
 							class="rounded-lg p-1 transition outline-gray-200 hover:bg-gray-100 dark:outline-gray-700 dark:hover:bg-gray-800"
 							on:click={() => {
-								textScale = Math.min(1.5, parseFloat((textScale + 0.1).toFixed(2)));
+								textScale = Math.min(1.5, textScale);
 								setTextScaleHandler(textScale);
 							}}
 							aria-labelledby="ui-scale-label"
@@ -713,26 +713,24 @@
 				</div>
 			</div>
 
-			{#if $user.role === 'admin' || $user?.permissions?.chat?.temporary}
-				<div>
-					<div class=" py-0.5 flex w-full justify-between">
-						<div id="temp-chat-default-label" class=" self-center text-xs">
-							{$i18n.t('Temporary Chat by Default')}
-						</div>
+			<div>
+				<div class=" py-0.5 flex w-full justify-between">
+					<div id="temp-chat-default-label" class=" self-center text-xs">
+						{$i18n.t('Temporary Chat by Default')}
+					</div>
 
-						<div class="flex items-center gap-2 p-1">
-							<Switch
-								ariaLabelledbyId="temp-chat-default-label"
-								tooltip={true}
-								bind:state={temporaryChatByDefault}
-								on:change={() => {
-									saveSettings({ temporaryChatByDefault });
-								}}
-							/>
-						</div>
+					<div class="flex items-center gap-2 p-1">
+						<Switch
+							ariaLabelledbyId="temp-chat-default-label"
+							tooltip={true}
+							bind:state={temporaryChatByDefault}
+							on:change={() => {
+								saveSettings({ temporaryChatByDefault });
+							}}
+						/>
 					</div>
 				</div>
-			{/if}
+			</div>
 
 			<div>
 				<div class=" py-0.5 flex w-full justify-between">

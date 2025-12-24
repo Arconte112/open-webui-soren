@@ -12,10 +12,7 @@ import re
 
 from urllib.parse import quote
 from huggingface_hub import snapshot_download
-from langchain_classic.retrievers import (
-    ContextualCompressionRetriever,
-    EnsembleRetriever,
-)
+from langchain.retrievers import ContextualCompressionRetriever, EnsembleRetriever
 from langchain_community.retrievers import BM25Retriever
 from langchain_core.documents import Document
 
@@ -40,6 +37,7 @@ from open_webui.retrieval.loaders.youtube import YoutubeLoader
 
 
 from open_webui.env import (
+    SRC_LOG_LEVELS,
     OFFLINE_MODE,
     ENABLE_FORWARD_USER_INFO_HEADERS,
 )
@@ -50,6 +48,7 @@ from open_webui.config import (
 )
 
 log = logging.getLogger(__name__)
+log.setLevel(SRC_LOG_LEVELS["RAG"])
 
 
 from typing import Any
@@ -1282,7 +1281,7 @@ class RerankCompressor(BaseDocumentCompressor):
 
         scores = None
         if reranking:
-            scores = await asyncio.to_thread(self.reranking_function, query, documents)
+            scores = self.reranking_function(query, documents)
         else:
             from sentence_transformers import util
 

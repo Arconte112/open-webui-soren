@@ -136,11 +136,11 @@
 				class=" text-left self-center overflow-hidden w-full line-clamp-1 flex-1 pr-1 flex items-center gap-2.5"
 			>
 				{#if channel?.name}
-					<span class="line-clamp-1">
+					<span>
 						{channel.name}
 					</span>
 				{:else}
-					<span class="shrink-0 line-clamp-1">
+					<span class="shrink-0">
 						{channel?.users
 							?.filter((u) => u.id !== $user?.id)
 							.map((u) => u.name)
@@ -151,7 +151,7 @@
 						{@const dmUser = channel.users.find((u) => u.id !== $user?.id)}
 
 						{#if dmUser?.status_emoji || dmUser?.status_message}
-							<span class="flex gap-1.5 line-clamp-1">
+							<span class="flex gap-1.5">
 								{#if dmUser?.status_emoji}
 									<div class=" self-center shrink-0">
 										<Emoji className="size-3.5" shortCode={dmUser?.status_emoji} />

@@ -31,6 +31,7 @@ from open_webui.config import (
     PINECONE_METRIC,
     PINECONE_CLOUD,
 )
+from open_webui.env import SRC_LOG_LEVELS
 from open_webui.retrieval.vector.utils import process_metadata
 
 
@@ -38,6 +39,7 @@ NO_LIMIT = 10000  # Reasonable limit to avoid overwhelming the system
 BATCH_SIZE = 100  # Recommended batch size for Pinecone operations
 
 log = logging.getLogger(__name__)
+log.setLevel(SRC_LOG_LEVELS["RAG"])
 
 
 class PineconeClient(VectorDBBase):

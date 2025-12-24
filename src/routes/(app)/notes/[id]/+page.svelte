@@ -20,7 +20,7 @@
 {#if loaded}
 	<div
 		id="note-container"
-		class="w-full h-full {$showSidebar ? 'md:max-w-[calc(100%-var(--sidebar-width))]' : ''}"
+		class="w-full h-full {$showSidebar ? 'md:max-w-[calc(100%-260px)]' : ''}"
 	>
 		<NoteEditor id={$page.params.id} />
 	</div>

@@ -1,8 +1,6 @@
-<script lang="ts">
+<script>
 	import { getContext, onMount } from 'svelte';
-	import type { Writable } from 'svelte/store';
-
-	const i18n: Writable<any> = getContext('i18n');
+	const i18n = getContext('i18n');
 
 	import { fade } from 'svelte/transition';
 
@@ -11,13 +9,13 @@
 	import Spinner from '$lib/components/common/Spinner.svelte';
 	import { getChatListByFolderId } from '$lib/apis/chats';
 
-	export let folder: any = null;
+	export let folder = null;
 
 	let selectedTab = 'chats';
 
 	let page = 1;
 
-	let chats: any[] | null = null;
+	let chats = null;
 	let chatListLoading = false;
 	let allChatsLoaded = false;
 
@@ -26,7 +24,7 @@
 
 		page += 1;
 
-		let newChatList: any[] = [];
+		let newChatList = [];
 
 		newChatList = await getChatListByFolderId(localStorage.token, folder.id, page).catch(
 			(error) => {
@@ -37,7 +35,7 @@
 
 		// once the bottom of the list has been reached (no results) there is no need to continue querying
 		allChatsLoaded = newChatList.length === 0;
-		chats = [...(chats || []), ...(newChatList || [])];
+		chats = [...chats, ...newChatList];
 
 		chatListLoading = false;
 	};

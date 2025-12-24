@@ -3,9 +3,10 @@ import logging
 import aiohttp
 
 from open_webui.config import WEBUI_FAVICON_URL
-from open_webui.env import VERSION
+from open_webui.env import SRC_LOG_LEVELS, VERSION
 
 log = logging.getLogger(__name__)
+log.setLevel(SRC_LOG_LEVELS["WEBHOOK"])
 
 
 async def post_webhook(name: str, url: str, message: str, event_data: dict) -> bool:
