@@ -55,6 +55,7 @@
 	export let webSearchEnabled = false;
 	export let reasoningEffort: string | null = null;
 
+	export let onUpload: Function = (e) => {};
 	export let onSelect = (e) => {};
 	export let onChange = (e) => {};
 
@@ -221,9 +222,7 @@
 					on:reasoningchange={(e) => {
 						dispatch('reasoningchange', e.detail);
 					}}
-					on:upload={(e) => {
-						dispatch('upload', e.detail);
-					}}
+					{onUpload}
 					on:submit={(e) => {
 						dispatch('submit', e.detail);
 					}}

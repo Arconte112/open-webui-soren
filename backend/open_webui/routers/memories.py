@@ -16,7 +16,7 @@ from open_webui.utils.task import clear_memories_cache, get_memories_engine
 
 
 log = logging.getLogger(__name__)
-log.setLevel(SRC_LOG_LEVELS["MODELS"])
+log.setLevel(SRC_LOG_LEVELS["MAIN"])
 
 router = APIRouter()
 

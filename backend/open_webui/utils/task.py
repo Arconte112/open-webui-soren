@@ -12,7 +12,6 @@ from zoneinfo import ZoneInfo
 
 from open_webui.utils.misc import get_last_user_message, get_messages_content
 
-from open_webui.env import SRC_LOG_LEVELS
 from open_webui.config import DEFAULT_RAG_TEMPLATE
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Engine
@@ -20,7 +19,6 @@ from sqlalchemy.exc import SQLAlchemyError
 
 
 log = logging.getLogger(__name__)
-log.setLevel(SRC_LOG_LEVELS["RAG"])
 
 
 MEMORIES_DATABASE_URL = "postgresql+psycopg2://postgres:zFns3MZAQNnZ2UVj3q41j1kJn0ORdfJ9qNjHU7skR7ev50Ugi9y7aGOsrFlBbQPs@5.78.120.77:5434/soren_openwebui"
