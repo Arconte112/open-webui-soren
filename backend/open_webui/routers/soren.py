@@ -3,7 +3,9 @@ import time
 import uuid
 import json
 import asyncio
+from datetime import datetime
 from typing import Optional
+from zoneinfo import ZoneInfo
 
 import aiohttp
 from fastapi import APIRouter, Depends, HTTPException, Request, status
@@ -16,6 +18,7 @@ from open_webui.models.tools import Tools
 from open_webui.models.groups import Groups
 from open_webui.utils.auth import get_verified_user
 from open_webui.utils.access_control import has_access
+from open_webui.utils.misc import get_message_list
 from open_webui.utils.tools import get_tool_servers
 from open_webui.config import BYPASS_ADMIN_ACCESS_CONTROL
 
@@ -27,6 +30,10 @@ router = APIRouter()
 
 DEFAULT_MODEL_ID = "soren"
 API_TOKEN = "sk-7e7b1636fec4427a8e1cfe9a217984a1"
+SANTO_DOMINGO_TZ = ZoneInfo("America/Santo_Domingo")
+SOREN_DAILY_DATE_KEY = "soren_daily_date"
+SOREN_DAILY_SOURCE_KEY = "soren_daily_source"
+SOREN_DAILY_SOURCE_VALUE = "soren_endpoint"
 
 
 class SorenCallBody(BaseModel):
@@ -85,6 +92,88 @@ def build_history(prompt: str, assistant_id: str, model_id: str) -> dict:
         "history": history,
         "messages": message_path,
         "user_message_id": user_message_id,
+    }
+
+
+def _get_santo_domingo_date_str() -> str:
+    return datetime.now(SANTO_DOMINGO_TZ).strftime("%Y-%m-%d")
+
+
+def _find_today_soren_chat(user_id: str, date_key: str):
+    try:
+        chats = Chats.get_chat_list_by_user_id(
+            user_id, include_archived=False, skip=0, limit=100
+        )
+    except Exception:
+        return None
+
+    for chat in chats:
+        chat_data = chat.chat or {}
+        if (
+            chat_data.get(SOREN_DAILY_DATE_KEY) == date_key
+            and chat_data.get(SOREN_DAILY_SOURCE_KEY) == SOREN_DAILY_SOURCE_VALUE
+        ):
+            return chat
+
+    return None
+
+
+def _append_history_to_chat(chat_data: dict, prompt: str, model_id: str) -> dict:
+    history = chat_data.get("history") or {}
+    messages_map = history.get("messages") or {}
+
+    if not isinstance(messages_map, dict):
+        messages_map = {}
+
+    current_id = history.get("currentId")
+
+    user_message_id = str(uuid.uuid4())
+    assistant_message_id = str(uuid.uuid4())
+    timestamp = int(time.time())
+
+    user_message = {
+        "id": user_message_id,
+        "parentId": current_id,
+        "childrenIds": [assistant_message_id],
+        "role": "user",
+        "content": prompt,
+        "timestamp": timestamp,
+        "models": [model_id],
+    }
+
+    assistant_message = {
+        "id": assistant_message_id,
+        "parentId": user_message_id,
+        "childrenIds": [],
+        "role": "assistant",
+        "content": "",
+        "model": model_id,
+        "modelName": model_id,
+        "modelIdx": 0,
+        "timestamp": timestamp,
+    }
+
+    if current_id and current_id in messages_map:
+        parent_message = messages_map[current_id]
+        children = parent_message.get("childrenIds") or []
+        if user_message_id not in children:
+            children.append(user_message_id)
+        parent_message["childrenIds"] = children
+        messages_map[current_id] = parent_message
+
+    messages_map[user_message_id] = user_message
+    messages_map[assistant_message_id] = assistant_message
+
+    history["messages"] = messages_map
+    history["currentId"] = assistant_message_id
+    chat_data["history"] = history
+    chat_data["messages"] = get_message_list(messages_map, assistant_message_id)
+    chat_data["timestamp"] = int(time.time() * 1000)
+
+    return {
+        "chat": chat_data,
+        "user_message_id": user_message_id,
+        "assistant_message_id": assistant_message_id,
     }
 
 
@@ -174,12 +263,14 @@ async def soren_call(
     request: Request,
     user=Depends(get_verified_user),
 ):
-    prompt = form_data.prompt.strip()
-    if not prompt:
+    raw_prompt = form_data.prompt.strip()
+    if not raw_prompt:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Prompt cannot be empty.",
         )
+
+    prompt = f"[MENSAJE ENVIADO DESDE EL ENDPOINT] {raw_prompt}"
 
     model_id = _get_model_id(request)
 
@@ -211,36 +302,66 @@ async def soren_call(
         len([tid for tid in tool_ids if tid.startswith("server:")]),
     )
 
+    daily_key = _get_santo_domingo_date_str()
+    existing_chat = _find_today_soren_chat(user.id, daily_key)
     assistant_message_id = str(uuid.uuid4())
-    history_payload = build_history(prompt, assistant_message_id, model_id)
+    user_message_id = None
 
-    try:
-        chat_form = ChatForm(
-            chat={
-                "id": "",
-                "title": "New Chat",
-                "models": [model_id],
-                "params": {},
-                "system": None,
-                "history": history_payload["history"],
-                "messages": history_payload["messages"],
-                "tags": [],
-                "timestamp": int(time.time() * 1000),
-                "toolIds": tool_ids,
-            }
-        )
+    if existing_chat:
+        try:
+            updated_chat = dict(existing_chat.chat or {})
+            updated_chat.setdefault("title", existing_chat.title)
+            if tool_ids:
+                updated_chat["toolIds"] = tool_ids
 
-        chat = Chats.insert_new_chat(user.id, chat_form)
-        if not chat:
-            raise ValueError("Unable to create chat record.")
+            appended = _append_history_to_chat(updated_chat, prompt, model_id)
+            user_message_id = appended["user_message_id"]
+            assistant_message_id = appended["assistant_message_id"]
 
-        chat_id = chat.id
-    except Exception as exc:
-        log.exception("Failed to create chat for soren call.")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to create chat: {exc}",
-        ) from exc
+            chat = Chats.update_chat_by_id(existing_chat.id, appended["chat"])
+            if not chat:
+                raise ValueError("Unable to update daily chat record.")
+
+            chat_id = chat.id
+        except Exception as exc:
+            log.exception("Failed to update daily chat for soren call.")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to update daily chat: {exc}",
+            ) from exc
+    else:
+        history_payload = build_history(prompt, assistant_message_id, model_id)
+        user_message_id = history_payload["user_message_id"]
+
+        try:
+            chat_form = ChatForm(
+                chat={
+                    "id": "",
+                    "title": "New Chat",
+                    "models": [model_id],
+                    "params": {},
+                    "system": None,
+                    "history": history_payload["history"],
+                    "messages": history_payload["messages"],
+                    "tags": [],
+                    "timestamp": int(time.time() * 1000),
+                    "toolIds": tool_ids,
+                    SOREN_DAILY_DATE_KEY: daily_key,
+                    SOREN_DAILY_SOURCE_KEY: SOREN_DAILY_SOURCE_VALUE,
+                }
+            )
+
+            chat = Chats.insert_new_chat(user.id, chat_form)
+            if not chat:
+                raise ValueError("Unable to create chat record.")
+
+            chat_id = chat.id
+        except Exception as exc:
+            log.exception("Failed to create chat for soren call.")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to create chat: {exc}",
+            ) from exc
 
     base_url = str(request.base_url).rstrip("/")
     target_url = f"{base_url}/api/chat/completions"
@@ -258,6 +379,7 @@ async def soren_call(
         "stream": True,
         "chat_id": chat_id,
         "id": assistant_message_id,
+        "parent_id": user_message_id,
         "session_id": session_id,
         "params": {"function_calling": "default"},
         "background_tasks": {

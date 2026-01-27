@@ -140,7 +140,7 @@
 	import Mention from '@tiptap/extension-mention';
 	import FormattingButtons from './RichTextInput/FormattingButtons.svelte';
 
-	import { PASTED_TEXT_CHARACTER_LIMIT } from '$lib/constants';
+import { PASTED_TEXT_CHARACTER_LIMIT } from '$lib/constants';
 	import { createLowlight } from 'lowlight';
 	import hljs from 'highlight.js';
 
@@ -150,7 +150,9 @@
 	export let oncompositionend = (e) => {};
 	export let onChange = (e) => {};
 
-	// create a lowlight instance with all languages loaded
+const LARGE_MESSAGE_INPUT_CHARACTER_LIMIT = PASTED_TEXT_CHARACTER_LIMIT * 8;
+
+// create a lowlight instance with all languages loaded
 	const lowlight = createLowlight(
 		hljs.listLanguages().reduce(
 			(obj, lang) => {
@@ -167,11 +169,12 @@
 	export let user = null;
 	export let files = [];
 
-	export let documentId = '';
+export let documentId = '';
 
-	export let className = 'input-prose';
-	export let placeholder = $i18n.t('Type here...');
-	let _placeholder = placeholder;
+export let className = 'input-prose';
+export let placeholder = $i18n.t('Type here...');
+let _placeholder = placeholder;
+let skipLargeMessageInputSync = false;
 
 	$: if (placeholder !== _placeholder) {
 		setPlaceholder();
@@ -776,6 +779,43 @@
 				editor = editor;
 				if (!editor) return;
 
+				const docSize = editor.state.doc.content.size;
+				if (messageInput && docSize > LARGE_MESSAGE_INPUT_CHARACTER_LIMIT) {
+					skipLargeMessageInputSync = true;
+					mdValue = editor.state.doc.textBetween(0, docSize, '\n', '\n');
+					onChange({
+						html: htmlValue,
+						json: jsonValue,
+						md: mdValue
+					});
+
+					if (!json) {
+						if (raw) {
+							value = htmlValue;
+						} else {
+							if (!preserveBreaks) {
+								mdValue = mdValue.replace(/<br\/>/g, '');
+							}
+
+							if (value !== mdValue) {
+								value = mdValue;
+
+								if (editor.isActive('paragraph')) {
+									if (value === '') {
+										editor.commands.clearContent();
+									}
+								}
+							}
+						}
+					}
+
+					return;
+				}
+
+				if (skipLargeMessageInputSync) {
+					skipLargeMessageInputSync = false;
+				}
+
 				htmlValue = editor.getHTML();
 				jsonValue = editor.getJSON();
 
@@ -1091,9 +1131,14 @@
 		}
 	});
 
-	$: if (value !== null && editor && !collaboration) {
-		onValueChange();
-	}
+$: if (
+	value !== null &&
+	editor &&
+	!collaboration &&
+	!(messageInput && skipLargeMessageInputSync)
+) {
+	onValueChange();
+}
 
 	const onValueChange = () => {
 		if (!editor) return;

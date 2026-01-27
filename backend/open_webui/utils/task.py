@@ -403,8 +403,8 @@ def prompt_template(template: str, user: Optional[Any] = None) -> str:
                 "age": str(age),
             }
 
-    # Get the current date
-    current_date = datetime.now()
+    # Get the current date in America/Santo_Domingo
+    current_date = datetime.now(SANTO_DOMINGO_TZ)
 
     # Format the date to YYYY-MM-DD
     formatted_date = current_date.strftime("%Y-%m-%d")

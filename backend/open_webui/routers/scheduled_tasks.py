@@ -38,6 +38,10 @@ class ScheduleTaskBody(BaseModel):
         default=None,
         description="Recurrencia: daily | weekly | monthly",
     )
+    recurrence_interval_hours: Optional[int] = Field(
+        default=None,
+        description="Recurrencia por intervalo de horas (prioridad sobre recurrence).",
+    )
     recurrence_end: Optional[str] = Field(
         default=None,
         description="Fecha/hora límite ISO8601 (UTC). Null = infinita.",
@@ -49,6 +53,7 @@ class ScheduledTaskResponse(BaseModel):
     prompt: str
     run_at: datetime
     recurrence: Optional[str]
+    recurrence_interval_hours: Optional[int]
     recurrence_end: Optional[datetime]
     notify: bool
     status: str
@@ -116,6 +121,24 @@ def _parse_recurrence(value: Optional[str]) -> Optional[str]:
     return value or None
 
 
+def _parse_recurrence_interval_hours(value: Optional[int]) -> Optional[int]:
+    if value is None:
+        return None
+    try:
+        interval = int(value)
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="recurrence_interval_hours debe ser un entero válido.",
+        ) from exc
+    if interval <= 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="recurrence_interval_hours debe ser mayor que 0.",
+        )
+    return interval
+
+
 def _parse_recurrence_end(value: Optional[str]) -> Optional[datetime]:
     if not value:
         return None
@@ -151,6 +174,9 @@ def schedule_task(
 
     run_at = _parse_run_at(form_data.run_at)
     recurrence = _parse_recurrence(form_data.recurrence)
+    recurrence_interval_hours = _parse_recurrence_interval_hours(
+        form_data.recurrence_interval_hours
+    )
     recurrence_end = _parse_recurrence_end(form_data.recurrence_end)
 
     try:
@@ -159,6 +185,7 @@ def schedule_task(
             run_at=run_at,
             notify=form_data.notify,
             recurrence=recurrence,
+            recurrence_interval_hours=recurrence_interval_hours,
             recurrence_end=recurrence_end,
         )
     except HTTPException:
@@ -175,6 +202,7 @@ def schedule_task(
         prompt=task.prompt,
         run_at=task.run_at,
         recurrence=task.recurrence,
+        recurrence_interval_hours=task.recurrence_interval_hours,
         recurrence_end=task.recurrence_end,
         notify=task.notify,
         status=task.status,

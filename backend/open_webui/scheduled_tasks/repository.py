@@ -25,6 +25,7 @@ class ScheduledTask:
     prompt: str
     run_at: datetime
     recurrence: Optional[str]
+    recurrence_interval_hours: Optional[int]
     recurrence_end: Optional[datetime]
     notify: bool
     status: str
@@ -40,6 +41,7 @@ CREATE TABLE IF NOT EXISTS scheduled_tasks (
     prompt TEXT NOT NULL,
     run_at TIMESTAMPTZ NOT NULL,
     recurrence TEXT,
+    recurrence_interval_hours INTEGER,
     recurrence_end TIMESTAMPTZ,
     notify BOOLEAN NOT NULL DEFAULT FALSE,
     status TEXT NOT NULL DEFAULT 'pending',
@@ -94,6 +96,7 @@ $$;
 ALTER_COLUMNS = """
 ALTER TABLE scheduled_tasks
     ADD COLUMN IF NOT EXISTS recurrence TEXT,
+    ADD COLUMN IF NOT EXISTS recurrence_interval_hours INTEGER,
     ADD COLUMN IF NOT EXISTS recurrence_end TIMESTAMPTZ;
 """
 
@@ -125,6 +128,7 @@ def _row_to_task(row) -> ScheduledTask:
         prompt=row["prompt"],
         run_at=row["run_at"],
         recurrence=row.get("recurrence"),
+        recurrence_interval_hours=row.get("recurrence_interval_hours"),
         recurrence_end=row.get("recurrence_end"),
         notify=bool(row["notify"]),
         status=row["status"],
@@ -140,6 +144,7 @@ def create_task(
     run_at: datetime,
     notify: bool,
     recurrence: Optional[str] = None,
+    recurrence_interval_hours: Optional[int] = None,
     recurrence_end: Optional[datetime] = None,
 ) -> ScheduledTask:
     engine = _get_engine()
@@ -149,9 +154,9 @@ def create_task(
         row = (
             conn.execute(
                 text(
-                    "INSERT INTO scheduled_tasks (prompt, run_at, notify, status, recurrence, recurrence_end) "
-                    "VALUES (:prompt, :run_at, :notify, :status, :recurrence, :recurrence_end) "
-                    "RETURNING id, prompt, run_at, notify, status, created_at, executed_at, last_error, last_response_preview, recurrence, recurrence_end"
+                    "INSERT INTO scheduled_tasks (prompt, run_at, notify, status, recurrence, recurrence_interval_hours, recurrence_end) "
+                    "VALUES (:prompt, :run_at, :notify, :status, :recurrence, :recurrence_interval_hours, :recurrence_end) "
+                    "RETURNING id, prompt, run_at, notify, status, created_at, executed_at, last_error, last_response_preview, recurrence, recurrence_interval_hours, recurrence_end"
                 ),
                 {
                     "prompt": prompt,
@@ -159,6 +164,7 @@ def create_task(
                     "notify": notify,
                     "status": STATUS_PENDING,
                     "recurrence": recurrence,
+                    "recurrence_interval_hours": recurrence_interval_hours,
                     "recurrence_end": recurrence_end,
                 },
             )
@@ -176,7 +182,7 @@ def get_due_tasks(now: datetime) -> List[ScheduledTask]:
     with engine.connect() as conn:
         rows = conn.execute(
             text(
-                "SELECT id, prompt, run_at, notify, status, created_at, executed_at, last_error, last_response_preview, recurrence, recurrence_end "
+                "SELECT id, prompt, run_at, notify, status, created_at, executed_at, last_error, last_response_preview, recurrence, recurrence_interval_hours, recurrence_end "
                 "FROM scheduled_tasks "
                 "WHERE status = :status AND run_at <= :now "
                 "ORDER BY run_at ASC, id ASC"

@@ -1,18 +1,16 @@
 """
 title: Programar tarea con Soren (DB directa)
-description: Inserta una tarea en la tabla scheduled_tasks de la BD externa (sin usar el endpoint HTTP).
-version: 1.1.0
+description: Inserta, edita, elimina y lista tareas en la tabla scheduled_tasks de la BD externa.
+version: 1.2.0
 author: arconte
 required_open_webui_version: 0.6.0
 requirements: psycopg2-binary
 """
 
 from __future__ import annotations
-
 import os
 from datetime import datetime
 from typing import Optional
-
 import psycopg2
 from psycopg2.extras import RealDictCursor
 from pydantic import BaseModel, Field
@@ -25,7 +23,7 @@ class Tools:
                 "SCHEDULED_TASKS_DATABASE_URL",
                 "postgresql://postgres:zFns3MZAQNnZ2UVj3q41j1kJn0ORdfJ9qNjHU7skR7ev50Ugi9y7aGOsrFlBbQPs@5.78.120.77:5434/soren_openwebui",
             ),
-            description="Cadena de conexi√≥n a Postgres para scheduled_tasks.",
+            description="Cadena de conexiÛn a Postgres para scheduled_tasks.",
         )
 
     def __init__(self):
@@ -39,6 +37,7 @@ class Tools:
                 prompt TEXT NOT NULL,
                 run_at TIMESTAMPTZ NOT NULL,
                 recurrence TEXT,
+                recurrence_interval_hours INTEGER,
                 recurrence_end TIMESTAMPTZ,
                 notify BOOLEAN NOT NULL DEFAULT FALSE,
                 status TEXT NOT NULL DEFAULT 'pending',
@@ -49,7 +48,6 @@ class Tools:
             );
             """
         )
-
         cur.execute(
             """
             DO $$
@@ -65,17 +63,23 @@ class Tools:
             $$;
             """
         )
-
         cur.execute(
             """CREATE INDEX IF NOT EXISTS scheduled_tasks_pending_idx ON scheduled_tasks (status, run_at);"""
         )
-
         cur.execute(
             """ALTER TABLE scheduled_tasks ADD COLUMN IF NOT EXISTS recurrence TEXT;"""
         )
         cur.execute(
+            """ALTER TABLE scheduled_tasks ADD COLUMN IF NOT EXISTS recurrence_interval_hours INTEGER;"""
+        )
+        cur.execute(
             """ALTER TABLE scheduled_tasks ADD COLUMN IF NOT EXISTS recurrence_end TIMESTAMPTZ;"""
         )
+
+    def _serialize(self, val):
+        if isinstance(val, datetime):
+            return val.isoformat()
+        return val
 
     async def schedule_task(
         self,
@@ -83,33 +87,44 @@ class Tools:
         run_at: str,
         notify: bool = False,
         recurrence: Optional[str] = None,
+        recurrence_interval_hours: Optional[int] = None,
         recurrence_end: Optional[str] = None,
     ) -> dict:
         """
         Crea una tarea programada para Soren.
 
-        :param prompt: Instrucci√≥n completa que se ejecutar√° en el futuro.
+        :param prompt: InstrucciÛn completa que se ejecutar· en el futuro.
         :param run_at: Fecha/hora ISO8601 (UTC), ej. 2025-12-05T12:00:00Z.
-        :param notify: Si es true, el worker enviar√° webhook a n8n tras ejecutar.
+        :param notify: Si es true, el worker enviar· webhook a n8n tras ejecutar.
         :param recurrence: daily | weekly | monthly | None
+        :param recurrence_interval_hours: Intervalo en horas (int) para recurrencia.
         :param recurrence_end: ISO8601 UTC o None (recurrencia infinita).
         """
-        # Validaci√≥n ligera de fecha
         try:
             datetime.fromisoformat(run_at.replace("Z", "+00:00"))
-        except ValueError as exc:  # pragma: no cover - validaci√≥n simple
-            return {"error": f"run_at inv√°lido: {exc}"}
+        except ValueError as exc:
+            return {"error": f"run_at inv·lido: {exc}"}
 
-        if recurrence:
-            if recurrence not in {"daily", "weekly", "monthly"}:
-                return {"error": "recurrence debe ser daily, weekly o monthly"}
+        if recurrence and recurrence not in {"daily", "weekly", "monthly"}:
+            return {"error": "recurrence debe ser daily, weekly o monthly"}
+
+        if recurrence_interval_hours is not None:
+            try:
+                interval = int(recurrence_interval_hours)
+            except (TypeError, ValueError) as exc:
+                return {"error": f"recurrence_interval_hours inv·lido: {exc}"}
+            if interval <= 0:
+                return {"error": "recurrence_interval_hours debe ser mayor que 0"}
+            recurrence_interval_hours = interval
 
         rec_end_dt: Optional[datetime] = None
         if recurrence_end:
             try:
-                rec_end_dt = datetime.fromisoformat(recurrence_end.replace("Z", "+00:00"))
-            except ValueError as exc:  # pragma: no cover
-                return {"error": f"recurrence_end inv√°lido: {exc}"}
+                rec_end_dt = datetime.fromisoformat(
+                    recurrence_end.replace("Z", "+00:00")
+                )
+            except ValueError as exc:
+                return {"error": f"recurrence_end inv·lido: {exc}"}
 
         conn = psycopg2.connect(self.valves.DATABASE_URL)
         conn.autocommit = True
@@ -117,19 +132,159 @@ class Tools:
             self._ensure_table(cur)
             cur.execute(
                 """
-                INSERT INTO scheduled_tasks (prompt, run_at, notify, status, recurrence, recurrence_end)
-                VALUES (%s, %s, %s, 'pending', %s, %s)
-                RETURNING id, prompt, run_at, notify, status, created_at, executed_at, last_error, last_response_preview, recurrence, recurrence_end;
+                INSERT INTO scheduled_tasks (prompt, run_at, notify, status, recurrence, recurrence_interval_hours, recurrence_end)
+                VALUES (%s, %s, %s, 'pending', %s, %s, %s)
+                RETURNING *;
                 """,
-                (prompt, run_at, notify, recurrence, rec_end_dt),
+                (prompt, run_at, notify, recurrence, recurrence_interval_hours, rec_end_dt),
             )
             row = cur.fetchone()
         conn.close()
 
-        def _ser(val):
-            if isinstance(val, datetime):
-                return val.isoformat()
-            return val
+        return {"inserted": {k: self._serialize(v) for k, v in row.items()}}
 
-        serialized = {k: _ser(v) for k, v in row.items()}
-        return {"inserted": serialized}
+    async def edit_task(
+        self,
+        task_id: int,
+        prompt: Optional[str] = None,
+        run_at: Optional[str] = None,
+        notify: Optional[bool] = None,
+        recurrence: Optional[str] = None,
+        recurrence_interval_hours: Optional[int] = None,
+        recurrence_end: Optional[str] = None,
+    ) -> dict:
+        """
+        Edita una tarea programada existente.
+
+        :param task_id: ID de la tarea a editar.
+        :param prompt: Nueva instrucciÛn (opcional).
+        :param run_at: Nueva fecha/hora ISO8601 UTC (opcional).
+        :param notify: Nuevo valor de notify (opcional).
+        :param recurrence: daily | weekly | monthly | None (opcional).
+        :param recurrence_interval_hours: Intervalo en horas (opcional).
+        :param recurrence_end: ISO8601 UTC o None (opcional).
+        """
+        updates = []
+        params = []
+
+        if prompt is not None:
+            updates.append("prompt = %s")
+            params.append(prompt)
+
+        if run_at is not None:
+            try:
+                datetime.fromisoformat(run_at.replace("Z", "+00:00"))
+            except ValueError as exc:
+                return {"error": f"run_at inv·lido: {exc}"}
+            updates.append("run_at = %s")
+            params.append(run_at)
+
+        if notify is not None:
+            updates.append("notify = %s")
+            params.append(notify)
+
+        if recurrence is not None:
+            if recurrence not in {"daily", "weekly", "monthly", ""}:
+                return {"error": "recurrence debe ser daily, weekly, monthly o vacÌo"}
+            updates.append("recurrence = %s")
+            params.append(recurrence if recurrence else None)
+
+        if recurrence_interval_hours is not None:
+            try:
+                interval = int(recurrence_interval_hours)
+            except (TypeError, ValueError) as exc:
+                return {"error": f"recurrence_interval_hours inv·lido: {exc}"}
+            if interval <= 0:
+                return {"error": "recurrence_interval_hours debe ser mayor que 0"}
+            updates.append("recurrence_interval_hours = %s")
+            params.append(interval)
+
+        if recurrence_end is not None:
+            if recurrence_end == "":
+                updates.append("recurrence_end = %s")
+                params.append(None)
+            else:
+                try:
+                    rec_end_dt = datetime.fromisoformat(
+                        recurrence_end.replace("Z", "+00:00")
+                    )
+                    updates.append("recurrence_end = %s")
+                    params.append(rec_end_dt)
+                except ValueError as exc:
+                    return {"error": f"recurrence_end inv·lido: {exc}"}
+
+        if not updates:
+            return {"error": "No se proporcionaron campos para actualizar"}
+
+        params.append(task_id)
+
+        conn = psycopg2.connect(self.valves.DATABASE_URL)
+        conn.autocommit = True
+        with conn, conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(
+                f"""
+                UPDATE scheduled_tasks
+                SET {", ".join(updates)}
+                WHERE id = %s AND status = 'pending'
+                RETURNING *;
+                """,
+                params,
+            )
+            row = cur.fetchone()
+        conn.close()
+
+        if not row:
+            return {"error": f"Tarea {task_id} no encontrada o ya no est· pendiente"}
+
+        return {"updated": {k: self._serialize(v) for k, v in row.items()}}
+
+    async def delete_task(self, task_id: int) -> dict:
+        """
+        Elimina una tarea programada.
+
+        :param task_id: ID de la tarea a eliminar.
+        """
+        conn = psycopg2.connect(self.valves.DATABASE_URL)
+        conn.autocommit = True
+        with conn, conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(
+                """
+                DELETE FROM scheduled_tasks
+                WHERE id = %s
+                RETURNING id, prompt, run_at, status;
+                """,
+                (task_id,),
+            )
+            row = cur.fetchone()
+        conn.close()
+
+        if not row:
+            return {"error": f"Tarea {task_id} no encontrada"}
+
+        return {"deleted": {k: self._serialize(v) for k, v in row.items()}}
+
+    async def list_pending_tasks(self, limit: int = 20) -> dict:
+        """
+        Lista las tareas programadas pendientes.
+
+        :param limit: M·ximo de tareas a devolver (default 20).
+        """
+        conn = psycopg2.connect(self.valves.DATABASE_URL)
+        conn.autocommit = True
+        with conn, conn.cursor(cursor_factory=RealDictCursor) as cur:
+            self._ensure_table(cur)
+            cur.execute(
+                """
+                SELECT id, prompt, run_at, notify, recurrence, recurrence_interval_hours, recurrence_end, status, created_at
+                FROM scheduled_tasks
+                WHERE status = 'pending'
+                ORDER BY run_at ASC
+                LIMIT %s;
+                """,
+                (limit,),
+            )
+            rows = cur.fetchall()
+        conn.close()
+
+        tasks = [{k: self._serialize(v) for k, v in row.items()} for row in rows]
+        return {"pending_tasks": tasks, "count": len(tasks)}

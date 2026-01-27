@@ -118,6 +118,21 @@ def _next_run(current: datetime, recurrence: str) -> Optional[datetime]:
     return None
 
 
+def _next_run_for_task(task) -> Optional[datetime]:
+    interval = task.recurrence_interval_hours
+    if interval is not None:
+        try:
+            interval_value = int(interval)
+        except (TypeError, ValueError):
+            return None
+        if interval_value > 0:
+            return task.run_at + timedelta(hours=interval_value)
+        return None
+    if task.recurrence:
+        return _next_run(task.run_at, task.recurrence)
+    return None
+
+
 def run_once(base_url: str, token: str) -> None:
     now = datetime.now(timezone.utc)
     tasks = get_due_tasks(now)
@@ -160,8 +175,8 @@ def run_once(base_url: str, token: str) -> None:
                 )
 
             now_exec = datetime.now(timezone.utc)
-            if task.recurrence:
-                next_run = _next_run(task.run_at, task.recurrence)
+            next_run = _next_run_for_task(task)
+            if next_run:
                 if next_run and (task.recurrence_end is None or next_run <= task.recurrence_end):
                     reschedule_task(
                         task_id=task_id,
@@ -170,7 +185,9 @@ def run_once(base_url: str, token: str) -> None:
                         executed_at=now_exec,
                     )
                     print(
-                        f"[scheduled_tasks] Tarea {task_id} finalizada y reprogramada a {next_run.isoformat()} (recurrence={task.recurrence})"
+                        "[scheduled_tasks] Tarea "
+                        f"{task_id} finalizada y reprogramada a {next_run.isoformat()} "
+                        f"(recurrence={task.recurrence}, recurrence_interval_hours={task.recurrence_interval_hours})"
                     )
                 else:
                     update_task_status(task_id, STATUS_COMPLETED, executed_at=now_exec)

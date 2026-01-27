@@ -1140,18 +1140,46 @@ export const bestMatchingLanguage = (supportedLanguages, preferredLanguages, def
 };
 
 // Get the date in the format YYYY-MM-DD
-export const getFormattedDate = () => {
+const SANTO_DOMINGO_TIMEZONE = 'America/Santo_Domingo';
+
+const getSantoDomingoDateTimeParts = () => {
 	const date = new Date();
-	const year = date.getFullYear();
-	const month = String(date.getMonth() + 1).padStart(2, '0');
-	const day = String(date.getDate()).padStart(2, '0');
+	const formatter = new Intl.DateTimeFormat('en-US', {
+		timeZone: SANTO_DOMINGO_TIMEZONE,
+		year: 'numeric',
+		month: '2-digit',
+		day: '2-digit',
+		hour: '2-digit',
+		minute: '2-digit',
+		second: '2-digit',
+		hour12: false
+	});
+	const parts = formatter.formatToParts(date);
+	const get = (type: string) => parts.find((part) => part.type === type)?.value ?? '';
+
+	return {
+		year: get('year'),
+		month: get('month'),
+		day: get('day'),
+		hour: get('hour'),
+		minute: get('minute'),
+		second: get('second'),
+		weekday: new Intl.DateTimeFormat('en-US', {
+			timeZone: SANTO_DOMINGO_TIMEZONE,
+			weekday: 'long'
+		}).format(date)
+	};
+};
+
+export const getFormattedDate = () => {
+	const { year, month, day } = getSantoDomingoDateTimeParts();
 	return `${year}-${month}-${day}`;
 };
 
 // Get the time in the format HH:MM:SS
 export const getFormattedTime = () => {
-	const date = new Date();
-	return date.toTimeString().split(' ')[0];
+	const { hour, minute, second } = getSantoDomingoDateTimeParts();
+	return `${hour}:${minute}:${second}`;
 };
 
 // Get the current date and time in the format YYYY-MM-DD HH:MM:SS
@@ -1166,9 +1194,7 @@ export const getUserTimezone = () => {
 
 // Get the weekday
 export const getWeekday = () => {
-	const date = new Date();
-	const weekdays = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-	return weekdays[date.getDay()];
+	return getSantoDomingoDateTimeParts().weekday;
 };
 
 export const createMessagesList = (history, messageId) => {
