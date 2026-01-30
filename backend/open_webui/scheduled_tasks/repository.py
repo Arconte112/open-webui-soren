@@ -27,6 +27,9 @@ class ScheduledTask:
     recurrence: Optional[str]
     recurrence_interval_hours: Optional[int]
     recurrence_end: Optional[datetime]
+    recurrence_weekdays: Optional[str]
+    recurrence_window_start_hour: Optional[int]
+    recurrence_window_end_hour: Optional[int]
     notify: bool
     status: str
     created_at: datetime
@@ -43,6 +46,9 @@ CREATE TABLE IF NOT EXISTS scheduled_tasks (
     recurrence TEXT,
     recurrence_interval_hours INTEGER,
     recurrence_end TIMESTAMPTZ,
+    recurrence_weekdays TEXT,
+    recurrence_window_start_hour INTEGER,
+    recurrence_window_end_hour INTEGER,
     notify BOOLEAN NOT NULL DEFAULT FALSE,
     status TEXT NOT NULL DEFAULT 'pending',
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -97,7 +103,10 @@ ALTER_COLUMNS = """
 ALTER TABLE scheduled_tasks
     ADD COLUMN IF NOT EXISTS recurrence TEXT,
     ADD COLUMN IF NOT EXISTS recurrence_interval_hours INTEGER,
-    ADD COLUMN IF NOT EXISTS recurrence_end TIMESTAMPTZ;
+    ADD COLUMN IF NOT EXISTS recurrence_end TIMESTAMPTZ,
+    ADD COLUMN IF NOT EXISTS recurrence_weekdays TEXT,
+    ADD COLUMN IF NOT EXISTS recurrence_window_start_hour INTEGER,
+    ADD COLUMN IF NOT EXISTS recurrence_window_end_hour INTEGER;
 """
 
 CREATE_INDEX = """
@@ -130,6 +139,9 @@ def _row_to_task(row) -> ScheduledTask:
         recurrence=row.get("recurrence"),
         recurrence_interval_hours=row.get("recurrence_interval_hours"),
         recurrence_end=row.get("recurrence_end"),
+        recurrence_weekdays=row.get("recurrence_weekdays"),
+        recurrence_window_start_hour=row.get("recurrence_window_start_hour"),
+        recurrence_window_end_hour=row.get("recurrence_window_end_hour"),
         notify=bool(row["notify"]),
         status=row["status"],
         created_at=row["created_at"],
@@ -146,6 +158,9 @@ def create_task(
     recurrence: Optional[str] = None,
     recurrence_interval_hours: Optional[int] = None,
     recurrence_end: Optional[datetime] = None,
+    recurrence_weekdays: Optional[str] = None,
+    recurrence_window_start_hour: Optional[int] = None,
+    recurrence_window_end_hour: Optional[int] = None,
 ) -> ScheduledTask:
     engine = _get_engine()
     _ensure_table(engine)
@@ -154,9 +169,9 @@ def create_task(
         row = (
             conn.execute(
                 text(
-                    "INSERT INTO scheduled_tasks (prompt, run_at, notify, status, recurrence, recurrence_interval_hours, recurrence_end) "
-                    "VALUES (:prompt, :run_at, :notify, :status, :recurrence, :recurrence_interval_hours, :recurrence_end) "
-                    "RETURNING id, prompt, run_at, notify, status, created_at, executed_at, last_error, last_response_preview, recurrence, recurrence_interval_hours, recurrence_end"
+                    "INSERT INTO scheduled_tasks (prompt, run_at, notify, status, recurrence, recurrence_interval_hours, recurrence_end, recurrence_weekdays, recurrence_window_start_hour, recurrence_window_end_hour) "
+                    "VALUES (:prompt, :run_at, :notify, :status, :recurrence, :recurrence_interval_hours, :recurrence_end, :recurrence_weekdays, :recurrence_window_start_hour, :recurrence_window_end_hour) "
+                    "RETURNING id, prompt, run_at, notify, status, created_at, executed_at, last_error, last_response_preview, recurrence, recurrence_interval_hours, recurrence_end, recurrence_weekdays, recurrence_window_start_hour, recurrence_window_end_hour"
                 ),
                 {
                     "prompt": prompt,
@@ -166,6 +181,9 @@ def create_task(
                     "recurrence": recurrence,
                     "recurrence_interval_hours": recurrence_interval_hours,
                     "recurrence_end": recurrence_end,
+                    "recurrence_weekdays": recurrence_weekdays,
+                    "recurrence_window_start_hour": recurrence_window_start_hour,
+                    "recurrence_window_end_hour": recurrence_window_end_hour,
                 },
             )
             .mappings()
@@ -182,7 +200,7 @@ def get_due_tasks(now: datetime) -> List[ScheduledTask]:
     with engine.connect() as conn:
         rows = conn.execute(
             text(
-                "SELECT id, prompt, run_at, notify, status, created_at, executed_at, last_error, last_response_preview, recurrence, recurrence_interval_hours, recurrence_end "
+                "SELECT id, prompt, run_at, notify, status, created_at, executed_at, last_error, last_response_preview, recurrence, recurrence_interval_hours, recurrence_end, recurrence_weekdays, recurrence_window_start_hour, recurrence_window_end_hour "
                 "FROM scheduled_tasks "
                 "WHERE status = :status AND run_at <= :now "
                 "ORDER BY run_at ASC, id ASC"

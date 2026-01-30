@@ -22,6 +22,7 @@
 
 	import ShareChatModal from '../chat/ShareChatModal.svelte';
 	import ModelSelector from '../chat/ModelSelector.svelte';
+	import ChatTabs from '../chat/ChatTabs.svelte';
 	import Tooltip from '../common/Tooltip.svelte';
 	import Menu from '$lib/components/layout/Navbar/Menu.svelte';
 	import UserMenu from '$lib/components/layout/Sidebar/UserMenu.svelte';
@@ -256,6 +257,8 @@
 			</div>
 		</div>
 	</div>
+
+	<ChatTabs />
 
 	{#if $temporaryChatEnabled && ($chatId ?? '').startsWith('local:')}
 		<div class=" w-full z-30 text-center">

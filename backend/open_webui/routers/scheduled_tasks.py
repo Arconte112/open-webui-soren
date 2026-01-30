@@ -1,6 +1,6 @@
 import logging
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Optional, List
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
@@ -46,6 +46,18 @@ class ScheduleTaskBody(BaseModel):
         default=None,
         description="Fecha/hora límite ISO8601 (UTC). Null = infinita.",
     )
+    recurrence_weekdays: Optional[List[int]] = Field(
+        default=None,
+        description="Días de la semana permitidos (0=Lunes ... 6=Domingo).",
+    )
+    recurrence_window_start_hour: Optional[int] = Field(
+        default=None,
+        description="Hora inicial permitida (0-23) para la recurrencia en America/Santo_Domingo.",
+    )
+    recurrence_window_end_hour: Optional[int] = Field(
+        default=None,
+        description="Hora final permitida (0-23) para la recurrencia en America/Santo_Domingo.",
+    )
 
 
 class ScheduledTaskResponse(BaseModel):
@@ -55,6 +67,9 @@ class ScheduledTaskResponse(BaseModel):
     recurrence: Optional[str]
     recurrence_interval_hours: Optional[int]
     recurrence_end: Optional[datetime]
+    recurrence_weekdays: Optional[str]
+    recurrence_window_start_hour: Optional[int]
+    recurrence_window_end_hour: Optional[int]
     notify: bool
     status: str
     created_at: datetime
@@ -155,6 +170,55 @@ def _parse_recurrence_end(value: Optional[str]) -> Optional[datetime]:
     return parsed.astimezone(timezone.utc)
 
 
+def _parse_recurrence_weekdays(value: Optional[List[int]]) -> Optional[str]:
+    if value is None:
+        return None
+    if not value:
+        return None
+    try:
+        weekdays = {int(day) for day in value}
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="recurrence_weekdays debe ser una lista de enteros (0-6).",
+        ) from exc
+    if any(day < 0 or day > 6 for day in weekdays):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="recurrence_weekdays solo acepta valores entre 0 y 6 (0=Lunes ... 6=Domingo).",
+        )
+    return ",".join(str(day) for day in sorted(weekdays))
+
+
+def _parse_hour_range(start_hour: Optional[int], end_hour: Optional[int]) -> tuple[Optional[int], Optional[int]]:
+    if start_hour is None and end_hour is None:
+        return None, None
+    if start_hour is None or end_hour is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="recurrence_window_start_hour y recurrence_window_end_hour deben enviarse juntos.",
+        )
+    try:
+        start = int(start_hour)
+        end = int(end_hour)
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="recurrence_window_start_hour y recurrence_window_end_hour deben ser enteros.",
+        ) from exc
+    if start < 0 or start > 23 or end < 0 or end > 23:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="recurrence_window_start_hour y recurrence_window_end_hour deben estar entre 0 y 23.",
+        )
+    if start > end:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="recurrence_window_start_hour debe ser menor o igual a recurrence_window_end_hour.",
+        )
+    return start, end
+
+
 @router.post(
     "/",
     response_model=ScheduledTaskResponse,
@@ -178,6 +242,11 @@ def schedule_task(
         form_data.recurrence_interval_hours
     )
     recurrence_end = _parse_recurrence_end(form_data.recurrence_end)
+    recurrence_weekdays = _parse_recurrence_weekdays(form_data.recurrence_weekdays)
+    recurrence_window_start_hour, recurrence_window_end_hour = _parse_hour_range(
+        form_data.recurrence_window_start_hour,
+        form_data.recurrence_window_end_hour,
+    )
 
     try:
         task = create_task(
@@ -187,6 +256,9 @@ def schedule_task(
             recurrence=recurrence,
             recurrence_interval_hours=recurrence_interval_hours,
             recurrence_end=recurrence_end,
+            recurrence_weekdays=recurrence_weekdays,
+            recurrence_window_start_hour=recurrence_window_start_hour,
+            recurrence_window_end_hour=recurrence_window_end_hour,
         )
     except HTTPException:
         raise
@@ -204,6 +276,9 @@ def schedule_task(
         recurrence=task.recurrence,
         recurrence_interval_hours=task.recurrence_interval_hours,
         recurrence_end=task.recurrence_end,
+        recurrence_weekdays=task.recurrence_weekdays,
+        recurrence_window_start_hour=task.recurrence_window_start_hour,
+        recurrence_window_end_hour=task.recurrence_window_end_hour,
         notify=task.notify,
         status=task.status,
         created_at=task.created_at,

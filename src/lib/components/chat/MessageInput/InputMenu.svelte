@@ -38,6 +38,7 @@
 
 	export let screenCaptureHandler: Function;
 	export let uploadFilesHandler: Function;
+	export let uploadFilesNoExtractHandler: Function | null = null;
 	export let inputFilesHandler: Function;
 
 	export let uploadGoogleDriveHandler: Function;
@@ -162,6 +163,34 @@
 							<div class="line-clamp-1">{$i18n.t('Upload Files')}</div>
 						</DropdownMenu.Item>
 					</Tooltip>
+
+					{#if uploadFilesNoExtractHandler}
+						<Tooltip
+							content={fileUploadCapableModels.length !== selectedModels.length
+								? $i18n.t('Model(s) do not support file upload')
+								: !fileUploadEnabled
+									? $i18n.t('You do not have permission to upload files.')
+									: ''}
+							className="w-full"
+						>
+							<DropdownMenu.Item
+								class="flex gap-2 items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800/50 rounded-xl {!fileUploadEnabled
+									? 'opacity-50'
+									: ''}"
+								on:click={() => {
+									if (fileUploadEnabled) {
+										uploadFilesNoExtractHandler();
+									}
+								}}
+							>
+								<DocumentArrowUp />
+
+								<div class="line-clamp-1">
+									{$i18n.t('Upload Files (no extract)')}
+								</div>
+							</DropdownMenu.Item>
+						</Tooltip>
+					{/if}
 
 					<Tooltip
 						content={fileUploadCapableModels.length !== selectedModels.length

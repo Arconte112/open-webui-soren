@@ -429,9 +429,11 @@
 	let chatInputElement;
 
 	let filesInputElement;
+	let filesNoExtractInputElement;
 	let commandsElement;
 
 	let inputFiles;
+	let inputFilesNoExtract;
 
 	let dragged = false;
 	let shiftKey = false;
@@ -544,7 +546,11 @@
 		}
 	};
 
-	const uploadFileHandler = async (file, fullContext: boolean = false) => {
+	const uploadFileHandler = async (
+		file,
+		fullContext: boolean = false,
+		options: { process?: boolean } = {}
+	) => {
 		if ($_user?.role !== 'admin' && !($_user?.permissions?.chat?.file_upload ?? true)) {
 			toast.error($i18n.t('You do not have permission to upload files.'));
 			return null;
@@ -555,6 +561,7 @@
 			return null;
 		}
 
+		const shouldProcess = options?.process !== false;
 		const tempItemId = uuidv4();
 		const fileItem = {
 			type: 'file',
@@ -591,7 +598,9 @@
 				}
 
 				// During the file upload, file content is automatically extracted.
-				const uploadedFile = await uploadFile(localStorage.token, file, metadata);
+				const uploadedFile = await uploadFile(localStorage.token, file, metadata, {
+					process: shouldProcess
+				});
 
 				if (uploadedFile) {
 					console.log('File upload completed:', {
@@ -620,6 +629,10 @@
 				toast.error(`${e}`);
 				files = files.filter((item) => item?.itemId !== tempItemId);
 			}
+		} else if (!shouldProcess) {
+			toast.error($i18n.t('Upload without extraction is unavailable in temporary chat.'));
+			files = files.filter((item) => item?.itemId !== tempItemId);
+			return null;
 		} else {
 			// If temporary chat is enabled, we just add the file to the list without uploading it.
 
@@ -750,6 +763,49 @@
 			} else {
 				uploadFileHandler(file);
 			}
+		});
+	};
+
+	const inputFilesNoExtractHandler = async (inputFiles) => {
+		console.log('Input files (no extract) handler called with:', inputFiles);
+
+		if (
+			($config?.file?.max_count ?? null) !== null &&
+			files.length + inputFiles.length > $config?.file?.max_count
+		) {
+			toast.error(
+				$i18n.t(`You can only chat with a maximum of {{maxCount}} file(s) at a time.`, {
+					maxCount: $config?.file?.max_count
+				})
+			);
+			return;
+		}
+
+		inputFiles.forEach(async (file) => {
+			console.log('Processing file (no extract):', {
+				name: file.name,
+				type: file.type,
+				size: file.size,
+				extension: file.name.split('.').at(-1)
+			});
+
+			if (
+				($config?.file?.max_size ?? null) !== null &&
+				file.size > ($config?.file?.max_size ?? 0) * 1024 * 1024
+			) {
+				console.log('File exceeds max size limit:', {
+					fileSize: file.size,
+					maxSize: ($config?.file?.max_size ?? 0) * 1024 * 1024
+				});
+				toast.error(
+					$i18n.t(`File size should not exceed {{maxSize}} MB.`, {
+						maxSize: $config?.file?.max_size
+					})
+				);
+				return;
+			}
+
+			await uploadFileHandler(file, false, { process: false });
 		});
 	};
 
@@ -1039,6 +1095,23 @@
 							}
 
 							filesInputElement.value = '';
+						}}
+					/>
+					<input
+						bind:this={filesNoExtractInputElement}
+						bind:files={inputFilesNoExtract}
+						type="file"
+						hidden
+						multiple
+						on:change={async () => {
+							if (inputFilesNoExtract && inputFilesNoExtract.length > 0) {
+								const _inputFiles = Array.from(inputFilesNoExtract);
+								inputFilesNoExtractHandler(_inputFiles);
+							} else {
+								toast.error($i18n.t(`File not found.`));
+							}
+
+							filesNoExtractInputElement.value = '';
 						}}
 					/>
 
@@ -1403,6 +1476,9 @@
 										{fileUploadCapableModels}
 										{screenCaptureHandler}
 										{inputFilesHandler}
+										uploadFilesNoExtractHandler={() => {
+											filesNoExtractInputElement.click();
+										}}
 										uploadFilesHandler={() => {
 											filesInputElement.click();
 										}}

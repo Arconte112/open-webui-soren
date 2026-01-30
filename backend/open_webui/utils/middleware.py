@@ -150,6 +150,13 @@ def process_tool_result(
     metadata=None,
     user=None,
 ):
+    def maybe_unescape_tool_result(value):
+        if not isinstance(value, str):
+            return value
+        if re.search(r"&(?:quot|apos|lt|gt|amp);|&#\d+;|&#x[0-9a-fA-F]+;", value):
+            return html.unescape(value)
+        return value
+
     tool_result_embeds = []
 
     if isinstance(tool_result, HTMLResponse):
@@ -280,6 +287,8 @@ def process_tool_result(
 
     if isinstance(tool_result, dict) or isinstance(tool_result, list):
         tool_result = json.dumps(tool_result, indent=2, ensure_ascii=False)
+
+    tool_result = maybe_unescape_tool_result(tool_result)
 
     return tool_result, tool_result_files, tool_result_embeds
 

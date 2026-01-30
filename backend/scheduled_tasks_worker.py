@@ -19,6 +19,7 @@ from typing import Any, Optional
 import urllib.error
 import urllib.request
 import argparse
+from zoneinfo import ZoneInfo
 
 # Asegura que podamos importar open_webui.*
 BACKEND_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -59,6 +60,7 @@ N8N_NOTIFY_URL = os.getenv(
     "SCHEDULED_TASKS_NOTIFY_URL",
     "https://n8n.automatadr.com/webhook/notificacion",
 )
+LOCAL_TZ = ZoneInfo("America/Santo_Domingo")
 
 
 def call_soren_wait(base_url: str, token: str, prompt: str) -> dict[str, Any]:
@@ -126,10 +128,100 @@ def _next_run_for_task(task) -> Optional[datetime]:
         except (TypeError, ValueError):
             return None
         if interval_value > 0:
-            return task.run_at + timedelta(hours=interval_value)
+            candidate = task.run_at + timedelta(hours=interval_value)
+            return _apply_recurrence_window(
+                candidate,
+                task.recurrence_weekdays,
+                task.recurrence_window_start_hour,
+                task.recurrence_window_end_hour,
+            )
         return None
     if task.recurrence:
-        return _next_run(task.run_at, task.recurrence)
+        candidate = _next_run(task.run_at, task.recurrence)
+        if candidate is None:
+            return None
+        return _apply_recurrence_window(
+            candidate,
+            task.recurrence_weekdays,
+            task.recurrence_window_start_hour,
+            task.recurrence_window_end_hour,
+        )
+    return None
+
+
+def _parse_weekdays(raw: Optional[str]) -> Optional[set[int]]:
+    if not raw:
+        return None
+    weekdays = set()
+    for part in raw.split(","):
+        part = part.strip()
+        if not part:
+            continue
+        try:
+            value = int(part)
+        except ValueError:
+            continue
+        if 0 <= value <= 6:
+            weekdays.add(value)
+    return weekdays or None
+
+
+def _is_within_window(local_dt: datetime, start_hour: Optional[int], end_hour: Optional[int], weekdays: Optional[set[int]]) -> bool:
+    if weekdays and local_dt.weekday() not in weekdays:
+        return False
+    if start_hour is None or end_hour is None:
+        return True
+    if start_hour <= end_hour:
+        return start_hour <= local_dt.hour <= end_hour
+    return local_dt.hour >= start_hour or local_dt.hour <= end_hour
+
+
+def _clamp_to_window(local_dt: datetime, start_hour: Optional[int], end_hour: Optional[int]) -> datetime:
+    if start_hour is None or end_hour is None:
+        return local_dt
+    if start_hour <= end_hour:
+        if local_dt.hour < start_hour:
+            return local_dt.replace(hour=start_hour)
+        if local_dt.hour > end_hour:
+            return (local_dt + timedelta(days=1)).replace(hour=start_hour)
+        return local_dt
+    if local_dt.hour >= start_hour or local_dt.hour <= end_hour:
+        return local_dt
+    return local_dt.replace(hour=start_hour)
+
+
+def _apply_recurrence_window(
+    candidate_utc: datetime,
+    weekdays_raw: Optional[str],
+    start_hour: Optional[int],
+    end_hour: Optional[int],
+) -> Optional[datetime]:
+    if not weekdays_raw and start_hour is None and end_hour is None:
+        return candidate_utc
+
+    weekdays = _parse_weekdays(weekdays_raw)
+    local_dt = candidate_utc.astimezone(LOCAL_TZ)
+    minute = local_dt.minute
+    second = local_dt.second
+    microsecond = local_dt.microsecond
+
+    local_dt = _clamp_to_window(local_dt, start_hour, end_hour).replace(
+        minute=minute, second=second, microsecond=microsecond
+    )
+
+    for _ in range(14):
+        if _is_within_window(local_dt, start_hour, end_hour, weekdays):
+            return local_dt.astimezone(timezone.utc)
+        local_dt = (local_dt + timedelta(days=1)).replace(
+            hour=start_hour if start_hour is not None else local_dt.hour,
+            minute=minute,
+            second=second,
+            microsecond=microsecond,
+        )
+        local_dt = _clamp_to_window(local_dt, start_hour, end_hour).replace(
+            minute=minute, second=second, microsecond=microsecond
+        )
+
     return None
 
 

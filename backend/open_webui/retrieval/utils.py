@@ -1025,7 +1025,50 @@ async def get_sources_from_items(
                     "metadatas": [[{"url": item.get("url"), "name": item.get("url")}]],
                 }
         elif item.get("type") == "file":
-            if (
+            file_object = None
+            if item.get("id"):
+                file_object = Files.get_file_by_id(item.get("id"))
+
+            if file_object:
+                file_content = (
+                    file_object.data.get("content", "") if file_object.data else ""
+                )
+                process_flag = (
+                    (file_object.meta or {}).get("data", {}).get("process", None)
+                )
+
+                if process_flag is False and not file_content:
+                    api_base = (
+                        request.app.state.config.WEBUI_URL
+                        or str(request.base_url).rstrip("/")
+                    )
+                    file_url = f"{api_base}/api/v1/files/{file_object.id}/content"
+                    storage_path = file_object.path or "unknown"
+                    query_result = {
+                        "documents": [
+                            [
+                                "\n".join(
+                                    [
+                                        "File uploaded without extraction.",
+                                        f"Name: {file_object.filename}",
+                                        f"Storage path: {storage_path}",
+                                        f"API URL: {file_url}",
+                                    ]
+                                )
+                            ]
+                        ],
+                        "metadatas": [
+                            [
+                                {
+                                    "file_id": file_object.id,
+                                    "name": file_object.filename,
+                                    "source": file_object.filename,
+                                }
+                            ]
+                        ],
+                    }
+
+            if query_result is None and (
                 item.get("context") == "full"
                 or request.app.state.config.BYPASS_EMBEDDING_AND_RETRIEVAL
             ):
@@ -1049,7 +1092,6 @@ async def get_sources_from_items(
                         ],
                     }
                 elif item.get("id"):
-                    file_object = Files.get_file_by_id(item.get("id"))
                     if file_object:
                         query_result = {
                             "documents": [[file_object.data.get("content", "")]],
@@ -1063,7 +1105,7 @@ async def get_sources_from_items(
                                 ]
                             ],
                         }
-            else:
+            elif query_result is None:
                 # Fallback to collection names
                 if item.get("legacy"):
                     collection_names.append(f"{item['id']}")

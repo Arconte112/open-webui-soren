@@ -1,7 +1,12 @@
 import { WEBUI_API_BASE_URL } from '$lib/constants';
 import { splitStream } from '$lib/utils';
 
-export const uploadFile = async (token: string, file: File, metadata?: object | null) => {
+export const uploadFile = async (
+	token: string,
+	file: File,
+	metadata?: object | null,
+	options?: { process?: boolean; processInBackground?: boolean }
+) => {
 	const data = new FormData();
 	data.append('file', file);
 	if (metadata) {
@@ -9,8 +14,17 @@ export const uploadFile = async (token: string, file: File, metadata?: object | 
 	}
 
 	let error = null;
+	const queryParams = new URLSearchParams();
+	if (options?.process === false) {
+		queryParams.append('process', 'false');
+	}
+	if (options?.processInBackground === false) {
+		queryParams.append('process_in_background', 'false');
+	}
+	const queryString = queryParams.toString();
+	const uploadUrl = queryString ? `${WEBUI_API_BASE_URL}/files/?${queryString}` : `${WEBUI_API_BASE_URL}/files/`;
 
-	const res = await fetch(`${WEBUI_API_BASE_URL}/files/`, {
+	const res = await fetch(uploadUrl, {
 		method: 'POST',
 		headers: {
 			Accept: 'application/json',
@@ -32,7 +46,7 @@ export const uploadFile = async (token: string, file: File, metadata?: object | 
 		throw error;
 	}
 
-	if (res) {
+	if (res && options?.process !== false) {
 		const status = await getFileProcessStatus(token, res.id);
 
 		if (status && status.ok) {

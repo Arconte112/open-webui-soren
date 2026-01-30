@@ -23,10 +23,32 @@
         "description": "Recurrencia opcional: daily, weekly o monthly.",
         "enum": ["daily", "weekly", "monthly"]
       },
+      "recurrence_interval_hours": {
+        "type": "integer",
+        "description": "Intervalo en horas para recurrencia (prioridad sobre recurrence).",
+        "minimum": 1
+      },
       "recurrence_end": {
         "type": "string",
         "description": "Fecha/hora límite ISO8601 UTC para la recurrencia (null = infinita).",
         "format": "date-time"
+      },
+      "recurrence_weekdays": {
+        "type": "array",
+        "description": "Días permitidos para la recurrencia (0=Lunes ... 6=Domingo).",
+        "items": { "type": "integer", "minimum": 0, "maximum": 6 }
+      },
+      "recurrence_window_start_hour": {
+        "type": "integer",
+        "description": "Hora inicial permitida (0-23) para la recurrencia en America/Santo_Domingo.",
+        "minimum": 0,
+        "maximum": 23
+      },
+      "recurrence_window_end_hour": {
+        "type": "integer",
+        "description": "Hora final permitida (0-23) para la recurrencia en America/Santo_Domingo.",
+        "minimum": 0,
+        "maximum": 23
       }
     },
     "required": ["prompt", "run_at"]

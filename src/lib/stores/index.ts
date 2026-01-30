@@ -49,6 +49,8 @@ export const TTSWorker = writable(null);
 
 export const chatId = writable('');
 export const chatTitle = writable('');
+export const chatTabs = writable<ChatTab[]>([]);
+export const activeChatTabId = writable('');
 
 export const channels = writable([]);
 export const channelId = writable(null);
@@ -101,6 +103,11 @@ export const isLastActiveTab = writable(true);
 export const playingNotificationSound = writable(false);
 
 export type Model = OpenAIModel | OllamaModel;
+
+export type ChatTab = {
+	id: string;
+	title: string;
+};
 
 type BaseModel = {
 	id: string;

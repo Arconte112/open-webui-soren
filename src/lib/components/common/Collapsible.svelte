@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { decode } from 'html-entities';
+import { decode } from 'html-entities';
 	import { v4 as uuidv4 } from 'uuid';
 
 	import { getContext } from 'svelte';
@@ -63,13 +63,24 @@
 
 	const collapsibleId = uuidv4();
 
-	function parseJSONString(str) {
-		try {
-			return parseJSONString(JSON.parse(str));
-		} catch (e) {
-			return str;
-		}
+function parseJSONString(str) {
+	try {
+		return parseJSONString(JSON.parse(str));
+	} catch (e) {
+		return str;
 	}
+}
+
+function decodePossiblyDoubleEscaped(str) {
+	if (str == null) {
+		return '';
+	}
+	const first = decode(String(str));
+	if (/[&](quot|apos|lt|gt|amp);|&#\d+;|&#x[0-9a-fA-F]+;/.test(first)) {
+		return decode(first);
+	}
+	return first;
+}
 
 	function formatJSONString(str) {
 		try {
@@ -90,10 +101,10 @@
 
 <div {id} class={className}>
 	{#if attributes?.type === 'tool_calls'}
-		{@const args = decode(attributes?.arguments)}
-		{@const result = decode(attributes?.result ?? '')}
-		{@const files = parseJSONString(decode(attributes?.files ?? ''))}
-		{@const embeds = parseJSONString(decode(attributes?.embeds ?? ''))}
+		{@const args = decodePossiblyDoubleEscaped(attributes?.arguments)}
+		{@const result = decodePossiblyDoubleEscaped(attributes?.result ?? '')}
+		{@const files = parseJSONString(decodePossiblyDoubleEscaped(attributes?.files ?? ''))}
+		{@const embeds = parseJSONString(decodePossiblyDoubleEscaped(attributes?.embeds ?? ''))}
 
 		{#if embeds && Array.isArray(embeds) && embeds.length > 0}
 			<div class="py-1 w-full cursor-pointer">

@@ -1,4 +1,10 @@
-from enum import StrEnum
+try:
+    from enum import StrEnum
+except ImportError:  # Py3.10 fallback
+    from enum import Enum
+
+    class StrEnum(str, Enum):
+        pass
 
 
 class VectorType(StrEnum):

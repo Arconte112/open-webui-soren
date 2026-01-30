@@ -1,7 +1,7 @@
 """
 title: Programar tarea con Soren (DB directa)
 description: Inserta, edita, elimina y lista tareas en la tabla scheduled_tasks de la BD externa.
-version: 1.2.0
+version: 1.3.0
 author: arconte
 required_open_webui_version: 0.6.0
 requirements: psycopg2-binary
@@ -39,6 +39,9 @@ class Tools:
                 recurrence TEXT,
                 recurrence_interval_hours INTEGER,
                 recurrence_end TIMESTAMPTZ,
+                recurrence_weekdays TEXT,
+                recurrence_window_start_hour INTEGER,
+                recurrence_window_end_hour INTEGER,
                 notify BOOLEAN NOT NULL DEFAULT FALSE,
                 status TEXT NOT NULL DEFAULT 'pending',
                 created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -75,6 +78,15 @@ class Tools:
         cur.execute(
             """ALTER TABLE scheduled_tasks ADD COLUMN IF NOT EXISTS recurrence_end TIMESTAMPTZ;"""
         )
+        cur.execute(
+            """ALTER TABLE scheduled_tasks ADD COLUMN IF NOT EXISTS recurrence_weekdays TEXT;"""
+        )
+        cur.execute(
+            """ALTER TABLE scheduled_tasks ADD COLUMN IF NOT EXISTS recurrence_window_start_hour INTEGER;"""
+        )
+        cur.execute(
+            """ALTER TABLE scheduled_tasks ADD COLUMN IF NOT EXISTS recurrence_window_end_hour INTEGER;"""
+        )
 
     def _serialize(self, val):
         if isinstance(val, datetime):
@@ -89,6 +101,9 @@ class Tools:
         recurrence: Optional[str] = None,
         recurrence_interval_hours: Optional[int] = None,
         recurrence_end: Optional[str] = None,
+        recurrence_weekdays: Optional[list[int]] = None,
+        recurrence_window_start_hour: Optional[int] = None,
+        recurrence_window_end_hour: Optional[int] = None,
     ) -> dict:
         """
         Crea una tarea programada para Soren.
@@ -99,6 +114,9 @@ class Tools:
         :param recurrence: daily | weekly | monthly | None
         :param recurrence_interval_hours: Intervalo en horas (int) para recurrencia.
         :param recurrence_end: ISO8601 UTC o None (recurrencia infinita).
+        :param recurrence_weekdays: Lista de dias permitidos (0=Lunes ... 6=Domingo).
+        :param recurrence_window_start_hour: Hora inicial permitida (0-23).
+        :param recurrence_window_end_hour: Hora final permitida (0-23).
         """
         try:
             datetime.fromisoformat(run_at.replace("Z", "+00:00"))
@@ -126,17 +144,53 @@ class Tools:
             except ValueError as exc:
                 return {"error": f"recurrence_end inválido: {exc}"}
 
+        weekdays_serialized: Optional[str] = None
+        if recurrence_weekdays is not None:
+            try:
+                weekdays = {int(day) for day in recurrence_weekdays}
+            except (TypeError, ValueError) as exc:
+                return {"error": f"recurrence_weekdays inválido: {exc}"}
+            if any(day < 0 or day > 6 for day in weekdays):
+                return {"error": "recurrence_weekdays debe contener valores entre 0 y 6"}
+            if weekdays:
+                weekdays_serialized = ",".join(str(day) for day in sorted(weekdays))
+
+        start_hour = None
+        end_hour = None
+        if recurrence_window_start_hour is not None or recurrence_window_end_hour is not None:
+            try:
+                start_hour = int(recurrence_window_start_hour) if recurrence_window_start_hour is not None else None
+                end_hour = int(recurrence_window_end_hour) if recurrence_window_end_hour is not None else None
+            except (TypeError, ValueError) as exc:
+                return {"error": f"recurrence_window_start_hour/end_hour inválido: {exc}"}
+            if start_hour is None or end_hour is None:
+                return {"error": "recurrence_window_start_hour y recurrence_window_end_hour deben enviarse juntos"}
+            if start_hour < 0 or start_hour > 23 or end_hour < 0 or end_hour > 23:
+                return {"error": "recurrence_window_start_hour y recurrence_window_end_hour deben estar entre 0 y 23"}
+            if start_hour > end_hour:
+                return {"error": "recurrence_window_start_hour debe ser menor o igual a recurrence_window_end_hour"}
+
         conn = psycopg2.connect(self.valves.DATABASE_URL)
         conn.autocommit = True
         with conn, conn.cursor(cursor_factory=RealDictCursor) as cur:
             self._ensure_table(cur)
             cur.execute(
                 """
-                INSERT INTO scheduled_tasks (prompt, run_at, notify, status, recurrence, recurrence_interval_hours, recurrence_end)
-                VALUES (%s, %s, %s, 'pending', %s, %s, %s)
+                INSERT INTO scheduled_tasks (prompt, run_at, notify, status, recurrence, recurrence_interval_hours, recurrence_end, recurrence_weekdays, recurrence_window_start_hour, recurrence_window_end_hour)
+                VALUES (%s, %s, %s, 'pending', %s, %s, %s, %s, %s, %s)
                 RETURNING *;
                 """,
-                (prompt, run_at, notify, recurrence, recurrence_interval_hours, rec_end_dt),
+                (
+                    prompt,
+                    run_at,
+                    notify,
+                    recurrence,
+                    recurrence_interval_hours,
+                    rec_end_dt,
+                    weekdays_serialized,
+                    start_hour,
+                    end_hour,
+                ),
             )
             row = cur.fetchone()
         conn.close()
@@ -152,6 +206,9 @@ class Tools:
         recurrence: Optional[str] = None,
         recurrence_interval_hours: Optional[int] = None,
         recurrence_end: Optional[str] = None,
+        recurrence_weekdays: Optional[list[int]] = None,
+        recurrence_window_start_hour: Optional[int] = None,
+        recurrence_window_end_hour: Optional[int] = None,
     ) -> dict:
         """
         Edita una tarea programada existente.
@@ -163,6 +220,9 @@ class Tools:
         :param recurrence: daily | weekly | monthly | None (opcional).
         :param recurrence_interval_hours: Intervalo en horas (opcional).
         :param recurrence_end: ISO8601 UTC o None (opcional).
+        :param recurrence_weekdays: Lista de dias permitidos (0=Lunes ... 6=Domingo) (opcional).
+        :param recurrence_window_start_hour: Hora inicial permitida (0-23) (opcional).
+        :param recurrence_window_end_hour: Hora final permitida (0-23) (opcional).
         """
         updates = []
         params = []
@@ -212,6 +272,37 @@ class Tools:
                     params.append(rec_end_dt)
                 except ValueError as exc:
                     return {"error": f"recurrence_end inválido: {exc}"}
+
+        if recurrence_weekdays is not None:
+            if recurrence_weekdays == []:
+                updates.append("recurrence_weekdays = %s")
+                params.append(None)
+            else:
+                try:
+                    weekdays = {int(day) for day in recurrence_weekdays}
+                except (TypeError, ValueError) as exc:
+                    return {"error": f"recurrence_weekdays inválido: {exc}"}
+                if any(day < 0 or day > 6 for day in weekdays):
+                    return {"error": "recurrence_weekdays debe contener valores entre 0 y 6"}
+                updates.append("recurrence_weekdays = %s")
+                params.append(",".join(str(day) for day in sorted(weekdays)))
+
+        if recurrence_window_start_hour is not None or recurrence_window_end_hour is not None:
+            try:
+                start_hour = int(recurrence_window_start_hour) if recurrence_window_start_hour is not None else None
+                end_hour = int(recurrence_window_end_hour) if recurrence_window_end_hour is not None else None
+            except (TypeError, ValueError) as exc:
+                return {"error": f"recurrence_window_start_hour/end_hour inválido: {exc}"}
+            if start_hour is None or end_hour is None:
+                return {"error": "recurrence_window_start_hour y recurrence_window_end_hour deben enviarse juntos"}
+            if start_hour < 0 or start_hour > 23 or end_hour < 0 or end_hour > 23:
+                return {"error": "recurrence_window_start_hour y recurrence_window_end_hour deben estar entre 0 y 23"}
+            if start_hour > end_hour:
+                return {"error": "recurrence_window_start_hour debe ser menor o igual a recurrence_window_end_hour"}
+            updates.append("recurrence_window_start_hour = %s")
+            params.append(start_hour)
+            updates.append("recurrence_window_end_hour = %s")
+            params.append(end_hour)
 
         if not updates:
             return {"error": "No se proporcionaron campos para actualizar"}
@@ -275,7 +366,7 @@ class Tools:
             self._ensure_table(cur)
             cur.execute(
                 """
-                SELECT id, prompt, run_at, notify, recurrence, recurrence_interval_hours, recurrence_end, status, created_at
+                SELECT id, prompt, run_at, notify, recurrence, recurrence_interval_hours, recurrence_end, recurrence_weekdays, recurrence_window_start_hour, recurrence_window_end_hour, status, created_at
                 FROM scheduled_tasks
                 WHERE status = 'pending'
                 ORDER BY run_at ASC

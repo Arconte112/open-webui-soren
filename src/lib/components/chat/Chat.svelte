@@ -35,6 +35,8 @@
 		mobile,
 		showOverview,
 		chatTitle,
+		chatTabs,
+		activeChatTabId,
 		showArtifacts,
 		artifactContents,
 		tools,
@@ -133,6 +135,50 @@ import NotificationToast from '../NotificationToast.svelte';
 		selectedModelIds = selectedModels;
 	}
 
+	const NEW_CHAT_TAB_ID = 'new';
+
+	const getTabTitle = (title: string | null | undefined) => {
+		const trimmed = (title ?? '').trim();
+		return trimmed.length > 0 ? trimmed : $i18n.t('New Chat');
+	};
+
+	const setActiveTab = (tabId: string) => {
+		if (get(activeChatTabId) !== tabId) {
+			activeChatTabId.set(tabId);
+		}
+	};
+
+	const upsertTab = (tabId: string, title: string | null | undefined) => {
+		const nextTitle = getTabTitle(title);
+		chatTabs.update((tabs) => {
+			const idx = tabs.findIndex((tab) => tab.id === tabId);
+			if (idx === -1) {
+				return [...tabs, { id: tabId, title: nextTitle }];
+			}
+			if (tabs[idx].title === nextTitle) {
+				return tabs;
+			}
+			const updated = [...tabs];
+			updated[idx] = { ...updated[idx], title: nextTitle };
+			return updated;
+		});
+	};
+
+	const replaceTabId = (fromId: string, toId: string, title: string | null | undefined) => {
+		const nextTitle = getTabTitle(title);
+		chatTabs.update((tabs) => {
+			let filtered = tabs.filter((tab) => tab.id !== toId);
+			const idx = filtered.findIndex((tab) => tab.id === fromId);
+			if (idx === -1) {
+				return [...filtered, { id: toId, title: nextTitle }];
+			}
+			const updated = [...filtered];
+			updated[idx] = { ...updated[idx], id: toId, title: nextTitle };
+			return updated;
+		});
+		setActiveTab(toId);
+	};
+
 	let selectedToolIds = [];
 	let selectedFilterIds = [];
 	let imageGenerationEnabled = false;
@@ -154,6 +200,14 @@ import NotificationToast from '../NotificationToast.svelte';
 	};
 
 	let taskIds = null;
+
+	$: if ($activeChatTabId === NEW_CHAT_TAB_ID) {
+		upsertTab(NEW_CHAT_TAB_ID, $i18n.t('New Chat'));
+	}
+
+	$: if ($chatId && $activeChatTabId === $chatId) {
+		upsertTab($chatId, $chatTitle);
+	}
 
 	// Chat Input
 	let prompt = '';
@@ -967,10 +1021,18 @@ import NotificationToast from '../NotificationToast.svelte';
 				$models.map((m) => m.id).includes(modelId)
 			);
 		} else {
+			let forceDefaultModels = false;
+			try {
+				forceDefaultModels = sessionStorage.getItem('chat-tabs-use-default-models') === 'true';
+				if (forceDefaultModels) {
+					sessionStorage.removeItem('chat-tabs-use-default-models');
+				}
+			} catch {}
+
 			if ($selectedFolder?.data?.model_ids) {
 				selectedModels = $selectedFolder?.data?.model_ids;
 			} else {
-				if (sessionStorage.selectedModels) {
+				if (!forceDefaultModels && sessionStorage.selectedModels) {
 					selectedModels = JSON.parse(sessionStorage.selectedModels);
 					sessionStorage.removeItem('selectedModels');
 				} else {
@@ -1008,6 +1070,8 @@ import NotificationToast from '../NotificationToast.svelte';
 		resetInput();
 		await chatId.set('');
 		await chatTitle.set('');
+		upsertTab(NEW_CHAT_TAB_ID, $i18n.t('New Chat'));
+		setActiveTab(NEW_CHAT_TAB_ID);
 
 		history = {
 			messages: {},
@@ -1080,6 +1144,7 @@ import NotificationToast from '../NotificationToast.svelte';
 
 	const loadChat = async () => {
 		chatId.set(chatIdProp);
+		setActiveTab(chatIdProp);
 
 		if ($temporaryChatEnabled) {
 			temporaryChatEnabled.set(false);
@@ -1129,6 +1194,7 @@ import NotificationToast from '../NotificationToast.svelte';
 				}
 
 				chatTitle.set(chatContent.title);
+				upsertTab($chatId, chatContent.title);
 
 				params = chatContent?.params ?? {};
 				chatFiles = chatContent?.files ?? [];
@@ -2291,6 +2357,7 @@ import NotificationToast from '../NotificationToast.svelte';
 
 			_chatId = chat.id;
 			await chatId.set(_chatId);
+			replaceTabId(NEW_CHAT_TAB_ID, _chatId, chat?.chat?.title ?? chat?.title);
 
 			window.history.replaceState(history.state, '', `/c/${_chatId}`);
 
@@ -2303,6 +2370,7 @@ import NotificationToast from '../NotificationToast.svelte';
 		} else {
 			_chatId = `local:${$socket?.id}`; // Use socket id for temporary chat
 			await chatId.set(_chatId);
+			replaceTabId(NEW_CHAT_TAB_ID, _chatId, $i18n.t('New Chat'));
 		}
 		await tick();
 

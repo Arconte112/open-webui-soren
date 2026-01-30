@@ -190,6 +190,9 @@ def upload_file_handler(
                 detail=ERROR_MESSAGES.DEFAULT("Invalid metadata format"),
             )
     file_metadata = metadata if metadata else {}
+    # Persist upload processing mode for downstream consumers (e.g., RAG/context builders)
+    # so "no extract" uploads can be handled differently.
+    file_metadata["process"] = process
 
     try:
         unsanitized_filename = file.filename
