@@ -127,6 +127,48 @@ class ChatTitleIdResponse(BaseModel):
     created_at: int
 
 
+class MessageStats(BaseModel):
+    id: Optional[str] = None
+    role: Optional[str] = None
+    model: Optional[str] = None
+    timestamp: Optional[int] = None
+    content_length: Optional[int] = None
+    token_count: Optional[int] = None
+    rating: Optional[int] = None
+    tags: Optional[list[str]] = None
+
+
+class ChatHistoryStats(BaseModel):
+    messages: dict[str, MessageStats] = {}
+    currentId: Optional[str] = None
+
+
+class ChatBody(BaseModel):
+    history: ChatHistoryStats
+
+
+class AggregateChatStats(BaseModel):
+    average_response_time: float = 0
+    average_user_message_content_length: float = 0
+    average_assistant_message_content_length: float = 0
+    models: dict[str, int] = {}
+    message_count: int = 0
+    history_models: dict[str, int] = {}
+    history_message_count: int = 0
+    history_user_message_count: int = 0
+    history_assistant_message_count: int = 0
+
+
+class ChatStatsExport(BaseModel):
+    id: str
+    user_id: str
+    created_at: int
+    updated_at: int
+    tags: list[str] = []
+    stats: AggregateChatStats
+    chat: ChatBody
+
+
 class ChatTable:
     def _clean_null_bytes(self, obj):
         """

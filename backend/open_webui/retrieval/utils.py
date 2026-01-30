@@ -12,7 +12,19 @@ import re
 
 from urllib.parse import quote
 from huggingface_hub import snapshot_download
-from langchain.retrievers import ContextualCompressionRetriever, EnsembleRetriever
+try:
+    from langchain.retrievers import ContextualCompressionRetriever, EnsembleRetriever
+except ImportError:
+    try:
+        from langchain_community.retrievers import (
+            ContextualCompressionRetriever,
+            EnsembleRetriever,
+        )
+    except ImportError:
+        from langchain_classic.retrievers import (
+            ContextualCompressionRetriever,
+            EnsembleRetriever,
+        )
 from langchain_community.retrievers import BM25Retriever
 from langchain_core.documents import Document
 

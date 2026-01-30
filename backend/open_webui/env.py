@@ -358,6 +358,10 @@ DATABASE_ENABLE_SQLITE_WAL = (
     os.environ.get("DATABASE_ENABLE_SQLITE_WAL", "False").lower() == "true"
 )
 
+DATABASE_ENABLE_SESSION_SHARING = (
+    os.environ.get("DATABASE_ENABLE_SESSION_SHARING", "False").lower() == "true"
+)
+
 DATABASE_USER_ACTIVE_STATUS_UPDATE_INTERVAL = os.environ.get(
     "DATABASE_USER_ACTIVE_STATUS_UPDATE_INTERVAL", None
 )

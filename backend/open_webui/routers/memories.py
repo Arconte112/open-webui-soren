@@ -6,6 +6,7 @@ from typing import Optional
 from datetime import datetime
 
 from sqlalchemy import text
+from sqlalchemy.orm import Session
 from sqlalchemy.exc import SQLAlchemyError
 
 from open_webui.models.memories import Memories, MemoryModel
@@ -13,6 +14,7 @@ from open_webui.retrieval.vector.factory import VECTOR_DB_CLIENT
 from open_webui.utils.auth import get_verified_user
 from open_webui.env import SRC_LOG_LEVELS
 from open_webui.utils.task import clear_memories_cache, get_memories_engine
+from open_webui.internal.db import get_session
 
 from open_webui.utils.access_control import has_permission
 from open_webui.constants import ERROR_MESSAGES

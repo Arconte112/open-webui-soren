@@ -7,7 +7,12 @@ import types
 import tempfile
 import logging
 
-from open_webui.env import SRC_LOG_LEVELS, PIP_OPTIONS, PIP_PACKAGE_INDEX_OPTIONS
+from open_webui.env import (
+    SRC_LOG_LEVELS,
+    PIP_OPTIONS,
+    PIP_PACKAGE_INDEX_OPTIONS,
+    OFFLINE_MODE,
+)
 from open_webui.models.functions import Functions
 from open_webui.models.tools import Tools
 

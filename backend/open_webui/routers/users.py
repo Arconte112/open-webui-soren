@@ -30,6 +30,7 @@ from open_webui.models.users import (
 
 from open_webui.constants import ERROR_MESSAGES
 from open_webui.env import SRC_LOG_LEVELS, STATIC_DIR
+from open_webui.internal.db import get_session
 
 
 from open_webui.utils.auth import (

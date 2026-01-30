@@ -2,7 +2,7 @@ import logging
 import time
 from typing import Optional
 
-from open_webui.internal.db import Base, JSONField, get_db
+from open_webui.internal.db import Base, JSONField, get_db, get_db_context
 from open_webui.env import SRC_LOG_LEVELS
 
 from open_webui.models.groups import Groups
@@ -16,6 +16,7 @@ from sqlalchemy.dialects import postgresql, sqlite
 
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy import BigInteger, Column, Text, JSON, Boolean
+from sqlalchemy.orm import Session
 
 
 from open_webui.utils.access_control import has_access

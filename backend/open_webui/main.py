@@ -51,11 +51,19 @@ from starlette.middleware.sessions import SessionMiddleware
 from starlette.responses import Response, StreamingResponse
 from starlette.datastructures import Headers
 
-from starsessions import (
-    SessionMiddleware as StarSessionsMiddleware,
-    SessionAutoloadMiddleware,
-)
-from starsessions.stores.redis import RedisStore
+try:
+    from starsessions import (
+        SessionMiddleware as StarSessionsMiddleware,
+        SessionAutoloadMiddleware,
+    )
+except Exception:
+    from starsessions import SessionMiddleware as StarSessionsMiddleware
+
+    SessionAutoloadMiddleware = None
+try:
+    from starsessions.stores.redis import RedisStore
+except Exception:
+    RedisStore = None
 
 from open_webui.utils import logger
 from open_webui.utils.audit import AuditLevel, AuditLoggingMiddleware
@@ -468,6 +476,9 @@ from open_webui.env import (
     INSTANCE_ID,
     WEBUI_BUILD_HASH,
     WEBUI_SECRET_KEY,
+    WEBUI_ADMIN_EMAIL,
+    WEBUI_ADMIN_PASSWORD,
+    WEBUI_ADMIN_NAME,
     WEBUI_SESSION_COOKIE_SAME_SITE,
     WEBUI_SESSION_COOKIE_SECURE,
     ENABLE_SIGNUP_PASSWORD_CONFIRMATION,
@@ -562,8 +573,7 @@ class SPAStaticFiles(StaticFiles):
                 raise ex
 
 
-print(
-    rf"""
+BANNER = rf"""
  ██████╗ ██████╗ ███████╗███╗   ██╗    ██╗    ██╗███████╗██████╗ ██╗   ██╗██╗
 ██╔═══██╗██╔══██╗██╔════╝████╗  ██║    ██║    ██║██╔════╝██╔══██╗██║   ██║██║
 ██║   ██║██████╔╝█████╗  ██╔██╗ ██║    ██║ █╗ ██║█████╗  ██████╔╝██║   ██║██║
@@ -576,7 +586,17 @@ v{VERSION} - building the best AI user interface.
 {f"Commit: {WEBUI_BUILD_HASH}" if WEBUI_BUILD_HASH != "dev-build" else ""}
 https://github.com/open-webui/open-webui
 """
-)
+
+try:
+    print(BANNER)
+except UnicodeEncodeError:
+    fallback_banner = (
+        f"Open WebUI v{VERSION} - building the best AI user interface.\n"
+        f"{f'Commit: {WEBUI_BUILD_HASH}' if WEBUI_BUILD_HASH != 'dev-build' else ''}\n"
+        "https://github.com/open-webui/open-webui\n"
+    )
+    print(fallback_banner)
+
 
 
 @asynccontextmanager
@@ -2128,12 +2148,15 @@ if len(app.state.config.TOOL_SERVER_CONNECTIONS) > 0:
 
 try:
     if ENABLE_STAR_SESSIONS_MIDDLEWARE:
+        if RedisStore is None:
+            raise ValueError("RedisStore not available")
         redis_session_store = RedisStore(
             url=REDIS_URL,
             prefix=(f"{REDIS_KEY_PREFIX}:session:" if REDIS_KEY_PREFIX else "session:"),
         )
 
-        app.add_middleware(SessionAutoloadMiddleware)
+        if SessionAutoloadMiddleware is not None:
+            app.add_middleware(SessionAutoloadMiddleware)
         app.add_middleware(
             StarSessionsMiddleware,
             store=redis_session_store,

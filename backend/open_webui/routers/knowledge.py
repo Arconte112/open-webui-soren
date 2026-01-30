@@ -1,5 +1,6 @@
 from typing import List, Optional
 from pydantic import BaseModel
+from sqlalchemy.orm import Session
 from fastapi import APIRouter, Depends, HTTPException, status, Request, Query
 from fastapi.responses import StreamingResponse
 from fastapi.concurrency import run_in_threadpool
@@ -31,6 +32,7 @@ from open_webui.utils.access_control import has_access, has_permission
 from open_webui.env import SRC_LOG_LEVELS
 from open_webui.config import BYPASS_ADMIN_ACCESS_CONTROL
 from open_webui.models.models import Models, ModelForm
+from open_webui.internal.db import get_session
 
 
 log = logging.getLogger(__name__)

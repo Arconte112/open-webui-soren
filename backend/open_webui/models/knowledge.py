@@ -4,7 +4,7 @@ import time
 from typing import Optional
 import uuid
 
-from open_webui.internal.db import Base, get_db
+from open_webui.internal.db import Base, get_db, get_db_context
 from open_webui.env import SRC_LOG_LEVELS
 
 from open_webui.models.files import File, FileModel, FileMetadataResponse
@@ -22,6 +22,7 @@ from sqlalchemy import (
     JSON,
     UniqueConstraint,
 )
+from sqlalchemy.orm import Session
 
 from open_webui.utils.access_control import has_access
 
@@ -186,7 +187,9 @@ class KnowledgeTable:
                 )
             return knowledge_bases
 
-    def check_access_by_user_id(self, id, user_id, permission="write") -> bool:
+    def check_access_by_user_id(
+        self, id, user_id, permission="write", db: Optional[Session] = None
+    ) -> bool:
         knowledge = self.get_knowledge_by_id(id)
         if not knowledge:
             return False

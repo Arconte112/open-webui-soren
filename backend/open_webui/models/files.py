@@ -2,10 +2,11 @@ import logging
 import time
 from typing import Optional
 
-from open_webui.internal.db import Base, JSONField, get_db
+from open_webui.internal.db import Base, JSONField, get_db, get_db_context
 from open_webui.env import SRC_LOG_LEVELS
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy import BigInteger, Column, String, Text, JSON
+from sqlalchemy.orm import Session
 
 log = logging.getLogger(__name__)
 log.setLevel(SRC_LOG_LEVELS["MODELS"])

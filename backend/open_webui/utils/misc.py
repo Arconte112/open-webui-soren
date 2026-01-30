@@ -4,6 +4,7 @@ import threading
 import time
 import uuid
 import logging
+from fnmatch import fnmatch
 from datetime import timedelta
 from pathlib import Path
 from typing import Callable, Optional, Sequence, Union
@@ -41,6 +42,19 @@ def get_allow_block_lists(filter_list):
                 allow_list.append(d.strip())
 
     return allow_list, block_list
+
+
+def strict_match_mime_type(
+    allowed_types: Optional[Sequence[str]], content_type: Optional[str]
+) -> bool:
+    if not allowed_types or not content_type:
+        return False
+
+    return any(
+        fnmatch(content_type, allowed_type.strip())
+        for allowed_type in allowed_types
+        if allowed_type and allowed_type.strip()
+    )
 
 
 def is_string_allowed(
