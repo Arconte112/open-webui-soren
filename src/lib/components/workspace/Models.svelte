@@ -24,6 +24,7 @@
 
 	import { getModels } from '$lib/apis';
 	import { getGroups } from '$lib/apis/groups';
+	import { updateUserSettings } from '$lib/apis/users';
 
 	import { capitalizeFirstLetter, copyToClipboard } from '$lib/utils';
 
@@ -43,6 +44,7 @@
 	import ViewSelector from './common/ViewSelector.svelte';
 	import TagSelector from './common/TagSelector.svelte';
 	import Pagination from '../common/Pagination.svelte';
+	import Badge from '$lib/components/common/Badge.svelte';
 
 	let shiftKey = false;
 
@@ -208,6 +210,19 @@
 			type: 'application/json'
 		});
 		saveAs(blob, `${model.id}-${Date.now()}.json`);
+	};
+
+	const pinModelHandler = async (modelId) => {
+		let pinnedModels = $settings?.pinnedModels ?? [];
+
+		if (pinnedModels.includes(modelId)) {
+			pinnedModels = pinnedModels.filter((id) => id !== modelId);
+		} else {
+			pinnedModels = [...new Set([...pinnedModels, modelId])];
+		}
+
+		settings.set({ ...$settings, pinnedModels: pinnedModels });
+		await updateUserSettings(localStorage.token, { ui: $settings });
 	};
 
 	onMount(async () => {

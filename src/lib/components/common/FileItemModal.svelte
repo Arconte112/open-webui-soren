@@ -8,7 +8,6 @@
 
 	import Modal from './Modal.svelte';
 	import XMark from '../icons/XMark.svelte';
-	import Info from '../icons/Info.svelte';
 	import Switch from './Switch.svelte';
 	import Tooltip from './Tooltip.svelte';
 	import dayjs from 'dayjs';

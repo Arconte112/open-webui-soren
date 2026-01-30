@@ -137,9 +137,9 @@ class KnowledgeForm(BaseModel):
 
 class KnowledgeTable:
     def insert_new_knowledge(
-        self, user_id: str, form_data: KnowledgeForm
+        self, user_id: str, form_data: KnowledgeForm, db: Optional[Session] = None
     ) -> Optional[KnowledgeModel]:
-        with get_db() as db:
+        with get_db_context(db) as db:
             knowledge = KnowledgeModel(
                 **{
                     **form_data.model_dump(),
@@ -170,7 +170,7 @@ class KnowledgeTable:
 
             user_ids = list(set(knowledge.user_id for knowledge in all_knowledge))
 
-            users = Users.get_users_by_user_ids(user_ids) if user_ids else []
+            users = Users.get_users_by_user_ids(user_ids, db=db) if user_ids else []
             users_dict = {user.id: user for user in users}
 
             knowledge_bases = []
@@ -192,14 +192,18 @@ class KnowledgeTable:
             return False
         if knowledge.user_id == user_id:
             return True
-        user_group_ids = {group.id for group in Groups.get_groups_by_member_id(user_id)}
+        user_group_ids = {
+            group.id for group in Groups.get_groups_by_member_id(user_id, db=db)
+        }
         return has_access(user_id, permission, knowledge.access_control, user_group_ids)
 
     def get_knowledge_bases_by_user_id(
-        self, user_id: str, permission: str = "write"
+        self, user_id: str, permission: str = "write", db: Optional[Session] = None
     ) -> list[KnowledgeUserModel]:
-        knowledge_bases = self.get_knowledge_bases()
-        user_group_ids = {group.id for group in Groups.get_groups_by_member_id(user_id)}
+        knowledge_bases = self.get_knowledge_bases(db=db)
+        user_group_ids = {
+            group.id for group in Groups.get_groups_by_member_id(user_id, db=db)
+        }
         return [
             knowledge_base
             for knowledge_base in knowledge_bases
@@ -209,9 +213,11 @@ class KnowledgeTable:
             )
         ]
 
-    def get_knowledge_by_id(self, id: str) -> Optional[KnowledgeModel]:
+    def get_knowledge_by_id(
+        self, id: str, db: Optional[Session] = None
+    ) -> Optional[KnowledgeModel]:
         try:
-            with get_db() as db:
+            with get_db_context(db) as db:
                 knowledge = db.query(Knowledge).filter_by(id=id).first()
                 return KnowledgeModel.model_validate(knowledge) if knowledge else None
         except Exception:
@@ -219,7 +225,7 @@ class KnowledgeTable:
 
     def get_knowledges_by_file_id(self, file_id: str) -> list[KnowledgeModel]:
         try:
-            with get_db() as db:
+            with get_db_context(db) as db:
                 knowledges = (
                     db.query(Knowledge)
                     .join(KnowledgeFile, Knowledge.id == KnowledgeFile.knowledge_id)
@@ -234,7 +240,7 @@ class KnowledgeTable:
 
     def get_files_by_id(self, knowledge_id: str) -> list[FileModel]:
         try:
-            with get_db() as db:
+            with get_db_context(db) as db:
                 files = (
                     db.query(File)
                     .join(KnowledgeFile, File.id == KnowledgeFile.file_id)
@@ -245,18 +251,24 @@ class KnowledgeTable:
         except Exception:
             return []
 
-    def get_file_metadatas_by_id(self, knowledge_id: str) -> list[FileMetadataResponse]:
+    def get_file_metadatas_by_id(
+        self, knowledge_id: str, db: Optional[Session] = None
+    ) -> list[FileMetadataResponse]:
         try:
-            with get_db() as db:
-                files = self.get_files_by_id(knowledge_id)
+            with get_db_context(db) as db:
+                files = self.get_files_by_id(knowledge_id, db=db)
                 return [FileMetadataResponse(**file.model_dump()) for file in files]
         except Exception:
             return []
 
     def add_file_to_knowledge_by_id(
-        self, knowledge_id: str, file_id: str, user_id: str
+        self,
+        knowledge_id: str,
+        file_id: str,
+        user_id: str,
+        db: Optional[Session] = None,
     ) -> Optional[KnowledgeFileModel]:
-        with get_db() as db:
+        with get_db_context(db) as db:
             knowledge_file = KnowledgeFileModel(
                 **{
                     "id": str(uuid.uuid4()),
@@ -280,9 +292,11 @@ class KnowledgeTable:
             except Exception:
                 return None
 
-    def remove_file_from_knowledge_by_id(self, knowledge_id: str, file_id: str) -> bool:
+    def remove_file_from_knowledge_by_id(
+        self, knowledge_id: str, file_id: str, db: Optional[Session] = None
+    ) -> bool:
         try:
-            with get_db() as db:
+            with get_db_context(db) as db:
                 db.query(KnowledgeFile).filter_by(
                     knowledge_id=knowledge_id, file_id=file_id
                 ).delete()
@@ -291,9 +305,11 @@ class KnowledgeTable:
         except Exception:
             return False
 
-    def reset_knowledge_by_id(self, id: str) -> Optional[KnowledgeModel]:
+    def reset_knowledge_by_id(
+        self, id: str, db: Optional[Session] = None
+    ) -> Optional[KnowledgeModel]:
         try:
-            with get_db() as db:
+            with get_db_context(db) as db:
                 # Delete all knowledge_file entries for this knowledge_id
                 db.query(KnowledgeFile).filter_by(knowledge_id=id).delete()
                 db.commit()
@@ -306,17 +322,21 @@ class KnowledgeTable:
                 )
                 db.commit()
 
-                return self.get_knowledge_by_id(id=id)
+                return self.get_knowledge_by_id(id=id, db=db)
         except Exception as e:
             log.exception(e)
             return None
 
     def update_knowledge_by_id(
-        self, id: str, form_data: KnowledgeForm, overwrite: bool = False
+        self,
+        id: str,
+        form_data: KnowledgeForm,
+        overwrite: bool = False,
+        db: Optional[Session] = None,
     ) -> Optional[KnowledgeModel]:
         try:
-            with get_db() as db:
-                knowledge = self.get_knowledge_by_id(id=id)
+            with get_db_context(db) as db:
+                knowledge = self.get_knowledge_by_id(id=id, db=db)
                 db.query(Knowledge).filter_by(id=id).update(
                     {
                         **form_data.model_dump(),
@@ -324,17 +344,17 @@ class KnowledgeTable:
                     }
                 )
                 db.commit()
-                return self.get_knowledge_by_id(id=id)
+                return self.get_knowledge_by_id(id=id, db=db)
         except Exception as e:
             log.exception(e)
             return None
 
     def update_knowledge_data_by_id(
-        self, id: str, data: dict
+        self, id: str, data: dict, db: Optional[Session] = None
     ) -> Optional[KnowledgeModel]:
         try:
-            with get_db() as db:
-                knowledge = self.get_knowledge_by_id(id=id)
+            with get_db_context(db) as db:
+                knowledge = self.get_knowledge_by_id(id=id, db=db)
                 db.query(Knowledge).filter_by(id=id).update(
                     {
                         "data": data,
@@ -342,22 +362,22 @@ class KnowledgeTable:
                     }
                 )
                 db.commit()
-                return self.get_knowledge_by_id(id=id)
+                return self.get_knowledge_by_id(id=id, db=db)
         except Exception as e:
             log.exception(e)
             return None
 
-    def delete_knowledge_by_id(self, id: str) -> bool:
+    def delete_knowledge_by_id(self, id: str, db: Optional[Session] = None) -> bool:
         try:
-            with get_db() as db:
+            with get_db_context(db) as db:
                 db.query(Knowledge).filter_by(id=id).delete()
                 db.commit()
                 return True
         except Exception:
             return False
 
-    def delete_all_knowledge(self) -> bool:
-        with get_db() as db:
+    def delete_all_knowledge(self, db: Optional[Session] = None) -> bool:
+        with get_db_context(db) as db:
             try:
                 db.query(Knowledge).delete()
                 db.commit()

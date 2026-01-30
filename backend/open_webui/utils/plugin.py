@@ -265,6 +265,10 @@ def get_function_module_from_cache(request, function_id, load_from_db=True):
 
 
 def install_frontmatter_requirements(requirements: str):
+    if OFFLINE_MODE:
+        log.info("Offline mode enabled, skipping installation of requirements.")
+        return
+
     if requirements:
         try:
             req_list = [req.strip() for req in requirements.split(",")]

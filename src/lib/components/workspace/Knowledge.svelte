@@ -94,6 +94,25 @@
 		}
 	};
 
+	const exportHandler = async (item) => {
+		try {
+			const blob = await exportKnowledgeById(localStorage.token, item.id);
+			if (blob) {
+				const url = URL.createObjectURL(blob);
+				const a = document.createElement('a');
+				a.href = url;
+				a.download = `${item.name}.zip`;
+				document.body.appendChild(a);
+				a.click();
+				document.body.removeChild(a);
+				URL.revokeObjectURL(url);
+				toast.success($i18n.t('Knowledge exported successfully'));
+			}
+		} catch (e) {
+			toast.error(`${e}`);
+		}
+	};
+
 	onMount(async () => {
 		viewOption = localStorage?.workspaceViewOption || '';
 		knowledgeBases = await getKnowledgeBaseList(localStorage.token);

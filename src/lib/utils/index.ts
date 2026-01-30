@@ -900,8 +900,8 @@ export const extractSentences = (text: string) => {
 		return placeholder;
 	});
 
-	// Split the modified text into sentences based on common punctuation marks, avoiding these blocks
-	let sentences = text.split(/(?<=[.!?])\s+/);
+	// Split the modified text into sentences based on common punctuation marks or newlines, avoiding these blocks
+	let sentences = text.split(/(?<=[.!?])\s+|\n+/);
 
 	// Restore code blocks and process sentences
 	sentences = sentences.map((sentence) => {
@@ -1283,6 +1283,11 @@ function resolveSchema(schemaRef, components, resolvedSchemas = new Set()) {
 // Main conversion function
 export const convertOpenApiToToolPayload = (openApiSpec) => {
 	const toolPayload = [];
+
+	// Guard against invalid or non-OpenAPI specs (e.g., MCP-style configs)
+	if (!openApiSpec || !openApiSpec.paths) {
+		return toolPayload;
+	}
 
 	for (const [path, methods] of Object.entries(openApiSpec.paths)) {
 		for (const [method, operation] of Object.entries(methods)) {
