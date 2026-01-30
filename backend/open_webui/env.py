@@ -78,11 +78,8 @@ LEVEL_NAMES = (
     else logging._nameToLevel
 )
 
-GLOBAL_LOG_LEVEL = os.environ.get("GLOBAL_LOG_LEVEL", "").upper()
-if GLOBAL_LOG_LEVEL in LEVEL_NAMES:
-    logging.basicConfig(stream=sys.stdout, level=GLOBAL_LOG_LEVEL, force=True)
-else:
-    GLOBAL_LOG_LEVEL = "INFO"
+GLOBAL_LOG_LEVEL = "DEBUG"
+logging.basicConfig(stream=sys.stdout, level=GLOBAL_LOG_LEVEL, force=True)
 
 log = logging.getLogger(__name__)
 log.info(f"GLOBAL_LOG_LEVEL: {GLOBAL_LOG_LEVEL}")
